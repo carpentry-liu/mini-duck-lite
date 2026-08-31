@@ -13,4 +13,4 @@ uv sync --all-groups
 uv run pytest
 uv run mini-duck-g0
 
-printf '\nLocal prerequisites are ready for the upstream G0 reproduction.\n'
+printf '\nV0.4 is installed. H0 prerequisites are ready; H1 still requires real hardware.\n'

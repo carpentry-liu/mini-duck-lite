@@ -6,11 +6,11 @@
 
 Duck V0.1 是第一种 embodiment。上层 Spatial、Skill、Agent 和 Gateway contract 不得写死到鸭子外壳或 10DOF。
 
-## D-002：严格执行 G0 -> G1
+## D-002：V0.3 严格执行 G0 -> G1
 
 日期：2026-08-31
 
-先复现官方 Microduck RL / Open Duck 基线，再建立自有 10DOF 模型。自制 tethered 几何模型不能替代官方 viewer/policy、task registry 或训练 smoke，因此从主线删除；历史仍可通过 Git commit 查询。
+先复现官方 Microduck RL / Open Duck 基线，再建立自有 10DOF 模型。自制 tethered 几何模型不能替代官方 viewer/policy、task registry 或训练 smoke，因此从主线删除；历史仍可通过 Git commit 查询。V0.4 的当前 Gate 顺序由 D-009 更新，但“上游证据不能被自制演示替代”的原则继续有效。
 
 ## D-003：Hard loop 与 AI 分离
 
@@ -50,4 +50,22 @@ Agent Gateway 优先提供 MCP；其他 Agent-Hardware 协议只通过 adapter �
 
 日期：2026-08-31
 
-长训练不以“跑满 iteration”或单轮 reward 作为完成条件。先用 128 个 domain-randomized 环境固定直行 10 秒，检查不摔比例、前向速度 RMSE、净横移、净偏航和 NaN；连续 seed 通过后可提前停止。官方 14DOF `model_1000.pt` 已按该规则选中，但只作为 G1 的训练/评估参考，不能替代自有 10DOF 策略。
+长训练不以“跑满 iteration”或单轮 reward 作为完成条件。先用 128 个 domain-randomized 环境固定直行 10 秒，检查不摔比例、前向速度 RMSE、净横移、净偏航和 NaN；连续 seed 通过后可提前停止。官方 14DOF `model_1000.pt` 已按该规则选中，但只作为 H0 的训练/评估参考，不能替代自有 10DOF 策略。
+
+## D-009：V0.4 改为 Hardware-First
+
+日期：2026-08-31
+
+H0 上游仿真通过后，当前 Gate 改为 H1 执行器/IMU 资格测试。第一批只验证 C044、C046 和 BNO085；先获得真实速度、温升、延迟、电流与断连数据，再决定 10DOF 执行器组合、仿真参数和批量采购。
+
+## D-010：No Hardware, No Done
+
+日期：2026-08-31
+
+证据等级固定为 `SIM_PASS -> HIL_PASS -> REAL_PASS`。mock、仿真、视频观感和上游策略都不能替代真实硬件验收。任何站立、行走、恢复、测绘或 Agent 控制能力只有 `REAL_PASS` 可以标记完成。
+
+## D-011：训练和真机运行分离
+
+日期：2026-08-31
+
+PPO 训练在 WSL2 + GPU 完成；Pi Zero 2 W 只运行 50 Hz ONNX inference、安全控制和 telemetry。部署包必须绑定 10DOF joint order、normalizer、action scale、control rate、training commit 和 SHA256；官方 14DOF policy 禁止直接下发给 Reference Prototype A。

@@ -13,8 +13,8 @@ def _available(command: str, arguments: Sequence[str]) -> CommandResult:
 def test_audit_reports_prerequisites_without_claiming_gate_passed() -> None:
     report = build_report(_available)
 
-    assert report["current_gate"] == "G1"
-    assert report["last_passed_gate"] == "G0"
+    assert report["current_gate"] == "H1"
+    assert report["last_passed_gate"] == "H0"
     assert report["environment_ready"] is True
     assert report["gate_passed"] is False
     assert report["g0_evidence"].endswith("g0-upstream-gpu-training.md")

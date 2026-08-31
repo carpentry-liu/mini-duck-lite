@@ -1,78 +1,73 @@
-# Mini Duck Physical AI Platform V0.3
+# Mini Duck Physical AI Platform V0.4
 
-本文档是 `Mini_Duck_Physical_AI_Platform_V0.3_PRD.docx` 的仓库执行版。原始 Word 文档是产品需求来源；本文件用于开发接力与 Gate 管理。
-
-## 产品定义
-
-Mini Duck Physical AI Platform 是一个以低成本双足机器人为第一载体的长期机器人实验项目。平台价值不在鸭子外壳，而在于建立五层可复用能力：
-
-1. **身体智能**：自主站立、移动和跌倒恢复。
-2. **空间智能**：知道自身位置、环境内容、可通行区域和目标位置。
-3. **具身 Agent**：理解任务、调用 Skill、观察结果并在失败后重规划。
-4. **跨本体复用**：未来更换轮式或四足本体时复用地图、记忆、Agent 与任务系统。
-5. **Agent-Hardware 互操作**：外部 Agent 只通过受控 Gateway + Skill 访问设备，模型可替换，真机安全边界不变。
+本文件是 `Mini_Duck_Physical_AI_Platform_V0.4_PRD.docx` 的仓库执行版。V0.4 把完成定义从“仿真方法成立”改为“真实 Duck 在目标场景通过”，当前状态为 **Hardware Qualification Ready**。
 
 ## 北极星体验
 
-### Duck V0.1 · Body Intelligence
+上电后自主站立、双足行走、发现人并靠近；被轻推倒后自主恢复并继续任务。过程不依赖持续遥控。SLAM、3DGS、VLA 和 Agent 只有在真实 Duck 数据与动作闭环中产生可复现结果才算完成。
 
-开机安全初始化后自主站立；摄像头发现前方的人；机器人调整朝向并双足走近 1-2 m，在安全距离停止；被轻推倒后检测 fallen，执行 recovery，重新站起并继续任务。全过程不依赖手机、手柄或持续遥控。
+## Hardware-First 硬规则
 
-### V1 · Spatial AI Scout
+- H0 复现上游仿真基线；H1 立即验证真实执行器与 IMU；
+- 第一批只验证 STS3215-C044 ×1、STS3215-C046 ×1 和 BNO085，不一次买满 10 个；
+- H1 数据决定每个关节的执行器组合、速度/延迟/热模型和后续采购；
+- H2 先做一条 5DOF 实体腿，H3 再做 10DOF 全身；
+- 首次全身站立使用限流外部电源，实测峰值电流后才确定电池/BMS/线径；
+- `SIM_PASS`、`HIL_PASS`、`REAL_PASS` 不得互相冒充；物理能力只有 `REAL_PASS` 可以标记 DONE。
 
-机器人进入未建图室内空间，自主探索并输出画面与位姿；建立几何地图，可选生成 3DGS；把电脑、门、桌子等记录为 Spatial Entity；接受自然语言目标后查询 Spatial Memory、规划路径、调用 Skill，并在失败时重规划。
+## Reference Prototype A
 
-V1 是长期北极星，只用于约束今天的数据、坐标、接口和硬件预留，不是当前开发任务。
+首台实体参考 Open Duck Mini v2 的约 42 cm class、每腿 5DOF、STS3215 总线和 Pi Zero 2 W runtime 思路，但外观、Sensor Head、配置和接口独立设计。
 
-## 工程原则
+```text
+固定/轻量 Sensor Head
+       │
+      Torso
+  ┌────┴────┐
+ Left      Right
+  5DOF      5DOF
+  │           │
+ Hip Yaw   Hip Yaw
+ Hip Roll  Hip Roll
+ Hip Pitch Hip Pitch
+ Knee      Knee
+ Ankle     Ankle
+  └──── 10 active joints ────┘
+```
 
-| 原则 | 要求 |
-|---|---|
-| Body first | 没有可靠 locomotion，不做套壳大模型。 |
-| Contract first | Joint、Policy、Frame、Time、Sensor、Skill 全部版本化。 |
-| Hard loop 与 AI 隔离 | 50 Hz runtime 不等待 LLM、VLA、3DGS 或网络。 |
-| Skill first | 高层 Agent 调用稳定 Skill，不直接发送 joint action。 |
-| Backend 可替换 | Localization、mapping、VLA/WAM 都通过 adapter 接入。 |
-| Embodiment 可替换 | Duck 是第一本体，上层不得写死到 10DOF。 |
-| Gate 控 scope | 热点只先占接口位置，到对应 Gate 才实现。 |
-| Hardware-safe | 外部 Agent 默认只读；写操作必须经过 lease、approval、安全与审计。 |
+头部第一版固定，嘴和翅膀不做，相机到 H6 再加。重心、外壳和 Sensor Head 等效质量必须进入自有 MJCF 和 Sim2Real 记录。
 
-## Duck V0.1 成功指标
+## H1 执行器资格测试
 
-### Stand / Walk
+C044（1:191）偏负载，C046（1:147）偏速度。宣传参数只用于筛选，仿真参数必须来自真实测试：
 
-- 平地连续行走首次验收不少于 2 m，后续目标不少于 5 m；
-- 10 次上电至少 8 次进入稳定站立；
-- 10 次 2 m 行走至少 7 次不摔；
-- runtime 目标 50 Hz，deadline miss、NaN、sensor stale 可检测。
+- 10°/30°/60° step response ×20；
+- 空载与杠杆负载速度；
+- 50 Hz command/read jitter 与丢包；
+- 电流、电压、温度、tracking RMSE、deadband/backlash proxy；
+- 拔线/断电后的 fail-safe 与恢复；
+- 30 min 连续动作。
 
-### Recovery
+第一批目标预算约 ¥600–1,000；无实物、无数据时字段统一写 `TBD_MEASURE`。
 
-- 至少一种标准跌倒姿态 10 次中不少于 7 次恢复；
-- 恢复后可返回 stand/walk，无需重启。
+## 计算与电气边界
 
-### Autonomous Approach
+- Pi Zero 2 W：本地 50 Hz runtime、watchdog、telemetry 和 ONNX inference；
+- 现有 PC/GPU：训练、视觉、3DGS、VLA 等 offboard 工作；
+- BNO085：V0.4 新购主 IMU；BNO055 仅作上游兼容；
+- 舵机 7.4V 母线与逻辑 5V 分离；10DOF 不经 5A adapter 供电；
+- 保险、物理断电、限流和左右腿电源注入是 H3 前置条件。
 
-- 感知输出 `target_visible`、`target_bearing`、`confidence`、`distance_proxy`；
-- 从约 1-2 m 自主转向、靠近并停止；
-- 感知失败进入 search/safe，禁止盲走。
+## 当前软件交付
 
-## V0.1 硬件边界
+- `HardwareManifest`：完整 SKU、候选 gear ratio、joint order、bus ID、hardware revision；
+- `ActuatorProfile` 日志结构与 mock 资格测试；
+- `ServoBus`、BNO085-first `ImuBackend` 和 BNO055 compatibility adapter；
+- 50 Hz runtime 的 timeout、deadline、NaN、soft-limit 和断连基础；
+- SIM/HIL/REAL evidence contract；
+- 10DOF ONNX policy bundle 与哈希/contract 校验；
+- WSL2 训练目录、调参入口和真机部署手册。
 
-| 模块 | V0.1 方向 | 当前状态 |
-|---|---|---|
-| 双腿 | 10DOF；每腿 hip yaw/roll/pitch + knee + ankle | G1 才锁定 axis/sign/home |
-| 执行器 | STS3215 7.4V 或同级反馈总线舵机 | `TBD_MEASURE`，G2 前不采购整套 |
-| IMU | 1 个 | 姿态、角速度、跌倒判断 |
-| 视觉 | 1 个 RGB camera | G6 找人；从首次接入起保存标定与时间戳 |
-| 计算 | Pi Zero 2W / Radxa Zero 3W / 其他 Linux SBC 候选 | G2 前不锁死；重 AI 优先 PC offboard |
+## 当前不做
 
-Sensor Head 必须可拆卸，并预留 RGB-D、Stereo、ToF、Event、Thermal 的标准安装面与数据接口。载荷能力只能通过重量、重心和步态测试确定。
-
-## 范围控制
-
-Agent-Hardware、Spatial AI、复杂地形、VLA 和 World Model 进入架构与 Roadmap，但不会提前进入实现。G0 已在目标开发机完成固定版本的官方 viewer/policy、64 环境 smoke 与 4,096 环境 GPU 并行验证；当前唯一主任务是 G1：自有 10DOF 仿真 Walk。
-
-## 预算原则
-
-G0/G1 使用现有电脑，预算为 ¥0。G2 只采购 2 舵机、总线板、IMU 和必要电源小件。Duck V0.1 真机总预算目标约 ¥2,000-3,000，所有型号和价格在采购 Gate 前重新核验。
+完整 3DGS 平台、VLA 万能策略、World Gym、自研 PCB、复杂云服务和外部 Agent 真机写操作均不属于 H1。真实硬件到货前，mock 只能证明工具链可运行，不能算 HIL。

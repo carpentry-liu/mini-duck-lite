@@ -13,7 +13,7 @@ from mini_duck_lite.upstream import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_required_v03_context_documents_exist() -> None:
+def test_required_v04_context_documents_exist() -> None:
     required = (
         "AGENTS.md",
         "docs/PRD.md",
@@ -21,13 +21,25 @@ def test_required_v03_context_documents_exist() -> None:
         "docs/INTERFACES.md",
         "docs/ROADMAP.md",
         "docs/PROGRESS.md",
+        "docs/HARDWARE_DEPLOYMENT.md",
+        "docs/WSL2_TRAINING.md",
     )
     assert all((ROOT / path).is_file() for path in required)
 
 
-def test_current_g0_does_not_ship_a_custom_robot_model() -> None:
+def test_current_h1_does_not_ship_an_unverified_custom_robot_model() -> None:
     assert not list((ROOT / "src").rglob("*.xml"))
     assert not (ROOT / "src/mini_duck_lite/simulation.py").exists()
+
+
+def test_hardware_first_configs_exist() -> None:
+    required = (
+        "config/hardware/reference-prototype-a.json",
+        "config/qualification/h1-c044-c046.json",
+        "config/runtime/mock-10dof.json",
+        "config/policy/policy-contract-v1.template.json",
+    )
+    assert all((ROOT / path).is_file() for path in required)
 
 
 def test_upstream_script_matches_the_versioned_smoke_contract() -> None:

@@ -1,116 +1,88 @@
-# 系统架构
+# V0.4 系统架构
 
-## 总体分层
+## Hardware-First 主线
+
+```mermaid
+flowchart TB
+  H1[H1 执行器/IMU 实测] --> PROFILE[ActuatorProfile + HardwareManifest]
+  CAD[10DOF CAD / MJCF] --> TRAIN[WSL2 MuJoCo + GPU PPO]
+  PROFILE --> TRAIN
+  TRAIN --> POLICY[ONNX + normalizer + Policy Contract]
+  POLICY --> REPLAY[CPU replay]
+  REPLAY --> HIL[单舵机/单腿 HIL]
+  HIL --> RT[Pi Zero 2 W · 50 Hz runtime]
+  RT --> SAFE[watchdog · limits · physical cut]
+  SAFE --> BODY[10DOF Duck]
+```
+
+训练模型必须吸收真实执行器、重心、质量、摩擦和时延数据。仿真负责高并发试错，真实 Gate 负责证明它能控制物理设备。
+
+## 三台“计算机”的职责
+
+| 位置 | 职责 | 不做什么 |
+|---|---|---|
+| Windows 宿主 | 文件管理、Codex 开发、视频与实验材料 | 不运行硬实时控制 |
+| WSL2 Ubuntu + RTX GPU | MuJoCo/mjlab、PPO、评估、ONNX 导出 | 不直接连真机舵机母线 |
+| Pi Zero 2 W | 50 Hz ONNX inference、watchdog、telemetry、servo/IMU I/O | 不训练大模型，不等待 LLM/网络 |
+
+## 真实硬件结构
+
+```mermaid
+flowchart LR
+  PI[Pi Zero 2 W] -->|UART TTL DATA| ADAPTER[Servo Adapter]
+  ADAPTER --> LEFT[Left leg · 5 servos]
+  ADAPTER --> RIGHT[Right leg · 5 servos]
+  IMU[BNO085] -->|I2C/UART| PI
+  PSU[7.4V PSU / 2S] --> FUSE[Main Fuse + Physical Cut]
+  FUSE --> LEFT
+  FUSE --> RIGHT
+  UBEC[5V UBEC] --> PI
+```
+
+Adapter 是通讯组件，不是 10DOF PDB。舵机电源与逻辑 5V 分离，首次全身测试使用限流外部电源。
+
+## 本地控制循环
+
+```mermaid
+flowchart LR
+  READ[servo + BNO085 read] --> OBS[PolicyInputV1]
+  OBS --> NORM[normalization]
+  NORM --> ONNX[10DOF ONNX]
+  ONNX --> SCALE[action scale + joint sign]
+  SCALE --> LIMIT[soft limit + safety]
+  LIMIT --> WRITE[servo write]
+  WRITE --> LOG[JSONL telemetry]
+  WATCH[timeout · stale · NaN · deadline] --> LIMIT
+```
+
+控制周期为 20 ms。任何 command timeout、sensor stale、NaN、舵机断连、超限或 deadline miss 都进入 safe state。LLM、VLA、mapping 和远程 UI 不进入这个 hard loop。
+
+## 上层平台仍然保留
 
 ```mermaid
 flowchart TB
   EXT[Claude / Codex / ChatGPT / Local Agent]
-  GW[Agent Gateway\nMCP · future MHS adapter\nAuth · Scope · Lease · Audit]
-  APP[Applications / Embodied Agent / Skill Router]
-  SKILL[Skills\nstand · recover · explore · navigate · inspect]
-  SPATIAL[Spatial Intelligence\nLocalization · Mapping · Spatial Memory]
-  PER[Perception\nRGB · Depth · Detection · Terrain]
-  RT[Locomotion Runtime\nState · Policy · Safety · 50 Hz]
-  BODY[Embodiment\nJoint · IMU · Camera · Power · Payload]
-
-  EXT --> GW --> APP --> SKILL
+  GW[Agent Gateway · Auth · Scope · Lease · Audit]
+  SKILL[Whitelisted Skills]
+  SPATIAL[Localization · Mapping · Spatial Memory]
+  RT[Safe Local Runtime]
+  BODY[Embodiment]
+  EXT --> GW --> SKILL
   SKILL --> SPATIAL
-  SKILL --> RT
-  SPATIAL --> PER
-  PER --> BODY
-  RT --> BODY
-  BODY --> RT
-  BODY --> PER
+  SKILL --> RT --> BODY
 ```
 
-依赖方向从上层意图流向稳定契约，再进入本地执行。任何上层组件崩溃、断网或超时，都不能阻止 runtime 进入 safe state。
+这些层只在对应真实 Gate 实现。外部 Agent 永远不获得 raw bus、joint angle 或 torque 写权限。
 
-## 时序与故障域
+## 当前落地模块
 
-| Loop | 建议频率 | 职责 | 禁止依赖 |
-|---|---:|---|---|
-| Control | 50 Hz | joint/IMU read -> policy -> safety -> servo write | LLM、云 API、mapping、远程 UI |
-| Perception / Localization | 10-30 Hz | detection、depth、VIO、pose | token-by-token Agent 决策 |
-| Mapping | 1-30 Hz | point cloud、TSDF、3DGS 或 semantic backend | hard runtime |
-| Behavior / Skill | 5-20 Hz / event | 状态机、Skill 生命周期、重试与取消 | raw servo bus |
-| Agent / VLM / LLM | 非实时 | 任务规划、空间查询、失败重规划 | 50 Hz 控制 deadline |
+| 模块 | V0.4 状态 |
+|---|---|
+| `manifest` | 10DOF HardwareManifest 校验与 fail-closed readiness |
+| `hardware` | ServoBus/ImuBackend、mock、BNO085、BNO055 compatibility |
+| `qualification` | H1 plan、CSV/JSON logger、mock dry run |
+| `runtime` | 50 Hz mock loop、安全状态基础 |
+| `policy_bundle` | 10DOF ONNX/contract/hash 部署包 |
+| `evidence` | SIM/HIL/REAL 证据字段校验 |
 
-## 三个 Plane
-
-```mermaid
-flowchart LR
-  TOOL[Tool Plane\nMCP/MHS adapter\ntool call · event · result]
-  DATA[Data Plane\nWebRTC/RTSP/file\nvideo · depth · map · 3DGS]
-  CTRL[Control Plane\nlocal runtime\npolicy · servo · watchdog]
-
-  TOOL -->|structured request| CTRL
-  CTRL -->|receipt / telemetry ref| TOOL
-  DATA -->|snapshot / stream ref| TOOL
-  CTRL -->|sensor data| DATA
-```
-
-视频、Depth 和 3D artifact 走 Data Plane；Agent 读取 snapshot、语义结果或 stream reference，不逐帧 reasoning。持续动作由本地 Skill/Policy 执行，Agent 只负责高层计划和异常处置。
-
-## Locomotion 训练与部署
-
-```mermaid
-flowchart LR
-  MODEL[Embodiment model + actuator model] --> SIM[MuJoCo / mjlab]
-  SIM --> PPO[PPO smoke then training]
-  PPO --> CKPT[checkpoint]
-  CKPT --> ONNX[ONNX + normalizer]
-  ONNX --> REPLAY[CPU MuJoCo replay]
-  REPLAY --> HIL[2-servo HIL]
-  HIL --> RT[50 Hz runtime]
-  RT --> SAFE[watchdog + limits + safe state]
-  SAFE --> BUS[servo bus]
-```
-
-G0 只复现上游链路；G1 才建立自有 10DOF embodiment。质量、惯量、摩擦、时延和 actuator 参数没有实测来源时必须标记 `TBD_MEASURE`。
-
-## Spatial AI 数据流
-
-```mermaid
-flowchart TB
-  SENSOR[RGB / Depth / IMU]
-  SYNC[Time Sync + Calibration]
-  LOC[LocalizationBackend\nVIO / SLAM]
-  POSE[PoseEstimate]
-  MAP[MappingBackend\npoint cloud / TSDF / 3DGS / semantic map]
-  MEM[SpatialMemory]
-  QUERY[Agent query / navigation target]
-
-  SENSOR --> SYNC --> LOC --> POSE --> MAP --> MEM --> QUERY
-```
-
-3DGS 是可替换 MappingBackend，不是 locomotion 或 Spatial Memory 的内部依赖。导航先需要稳定几何与可通行性，高质量渲染是独立价值。
-
-## Agent-Hardware 安全路径
-
-```mermaid
-flowchart TB
-  CALL[Agent tool call] --> AUTH[Auth + Scope]
-  AUTH --> LEASE[ControlLease + Approval]
-  LEASE --> CAP[CapabilityManifest]
-  CAP --> ROUTER[Skill Router]
-  ROUTER --> ENVELOPE[Safety Envelope]
-  ENVELOPE --> LOCAL[Local Runtime]
-  LOCAL --> RECEIPT[ExecutionReceipt]
-```
-
-远程 Agent 永不获得 `set_joint_angle`、`set_torque` 或 `raw_bus_write`。`stop` 使用独立高优先级安全路径。
-
-## 目标模块边界
-
-| 模块 | 稳定职责 | 首次实现 Gate |
-|---|---|---:|
-| `embodiment` | Joint/Frame/Sensor/Capability contract | G1 |
-| `training` | task、reward、DR、checkpoint、export | G1 |
-| `runtime` | 50 Hz state -> policy -> safety -> bus | G2/G3 |
-| `perception` | 目标和地形结构化输出 | G6/G7 |
-| `spatial` | localization、mapping、entity、memory | G8-G10 |
-| `skills` | 生命周期、precondition、progress、failure | G6.5/G11 |
-| `gateway` | MCP、auth、lease、approval、audit | G6.5/G11.5 |
-| `adapters` | VLA、WAM、MHS 等实验提供者 | G11.5-G13 |
-
-当前仓库已落地并通过 G0 环境与上游复现工具；G1 自有 `embodiment` 与 `training` 尚未实现，不能用空目录或上游 14DOF smoke 假装自有 10DOF 策略已经完成。
+真实 STS3215 backend、ONNX provider 和 Pi service 要等 H1 数据与硬件 revision 锁定后实现。

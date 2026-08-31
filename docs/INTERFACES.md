@@ -1,176 +1,94 @@
-# 核心接口
+# V0.4 核心接口
 
-本文档定义跨 Gate 保持稳定的接口边界。字段在实现前允许细化，但不得绕过安全层或把上层写死到 Duck 10DOF。
+## HardwareManifest V1
 
-## Embodiment Contract
+权威模板位于 `config/hardware/reference-prototype-a.json`，最少包含：
 
-必须版本化：
+- `hardware_revision`、完整 actuator SKU/gear ratio；
+- 10DOF `joint_order`、bus ID、执行器分配、软限位；
+- BNO085 primary 与 BNO055 compatibility；
+- Pi Zero 2 W runtime、舵机电压域与峰值电流；
+- 未实测字段必须是 `null`/`TBD_MEASURE`。
 
-- joint name、order、axis、sign、home、limit；
-- actuator mode、unit、action scale；
-- `world`、`map`、`odom`、`base_link`、`imu_link`、`camera_*`、`payload_*` frame；
-- mass、CoM、inertia 的来源与测量状态；
-- sensor timestamp、calibration version；
-- `CapabilityManifest`。
+manifest 可用于文档和 H1 准备，但在 bus ID、软限位、执行器分配、IMU HIL 和峰值电流完成前，`runtime_ready=false`。
 
-未知物理参数使用 `TBD_MEASURE`，不得从 Microduck/Open Duck 直接照搬到自有结构。
+## ActuatorProfile V1
+
+H1 每颗候选执行器输出：
+
+```text
+sku / gear_ratio / voltage
+hardware_revision / bus_id / firmware
+step_response[10,30,60] ×20
+no_load_speed / loaded_speed
+tracking_rmse / latency / jitter / packet_loss
+current / voltage / temperature time series
+deadband_backlash_proxy
+disconnect_and_recovery
+raw_csv_ref / summary_json_ref / video_ref
+```
+
+Mock logger 只生成 `SIM_PASS`，不能回写为真实 ActuatorProfile。
+
+## ServoBus
+
+```text
+read(bus_id) -> ServoState
+write_position(bus_id, position_rad)
+torque_off()
+close()
+```
+
+`ServoState` 包含 position、velocity、current、voltage、temperature、latency、connected 和 timestamp。真实 backend 必须完整报告单位和失败，不得用 0 填充不可读字段。
+
+## ImuBackend
+
+```text
+read() -> ImuSample
+close()
+```
+
+`ImuSample` 固定 `quaternion_wxyz`、angular velocity、linear acceleration、calibration 和 monotonic timestamp。V0.4 默认 BNO085；BNO055 adapter 只用于上游对照。
 
 ## Policy Contract V1
 
 ```text
-PolicyInputV1
-  joint_pos[10]          rad
-  joint_vel[10]          rad/s
-  base_orientation[4]    quaternion; ordering is versioned
-  base_ang_vel[3]        rad/s
-  command[3]             vx, vy, yaw_rate
-  prev_action[10]        optional by schema
+joint_pos[10]          rad
+joint_vel[10]          rad/s
+base_orientation[4]    quaternion wxyz
+base_ang_vel[3]        rad/s
+command[3]             vx, vy, yaw_rate
+prev_action[10]        按 schema 决定
 
-PolicyOutputV1
-  action[10]
-
-ArtifactMetadata
-  schema_version
-  embodiment_version
-  joint_order
-  units
-  normalization
-  action_scale
-  control_hz
-  training_commit
-  config
-  seed
-  model_hash
+PolicyOutput.action[10]
 ```
 
-ONNX 必须包含或明确绑定 observation normalizer。任何 joint order、单位或 action scale 不匹配都应 fail closed。
+部署 metadata 必须携带 embodiment version、joint order、units、normalization、action scale、control_hz=50、training commit/config/seed 和模型哈希。官方 14DOF policy 与 10DOF contract 不匹配时必须 fail closed。
 
-## Spatial Contract
+## SafeRuntime V1
 
-### Time 与 Calibration
-
-- 使用 monotonic timestamp；保留 source time、receive time 与 sequence id；
-- camera intrinsics、sensor-to-base extrinsics、IMU orientation 全部带版本；
-- 首次相机数据采集就保存标定与时间来源，不能等到 SLAM 阶段补录。
-
-### PoseEstimate
+本地 runtime 持有校准后的 HardwareManifest、ActuatorProfile 和 Policy Bundle。安全事件至少包括：
 
 ```text
-pose
-velocity
-quality
-frame_id
-source_timestamp
-receive_timestamp
-sequence_id
-calibration_version
+NO_COMMAND
+COMMAND_TIMEOUT
+CONTROL_DEADLINE_MISS
+IMU_STALE
+IMU_NAN
+IMU_IO_ERROR
+SERVO_<id>_DISCONNECTED
+JOINT_LIMIT
+POLICY_CONTRACT_MISMATCH
 ```
 
-### MapArtifact
+安全事件不依赖网络或 Agent，立即进入 safe state，并写入 telemetry。
 
-```text
-backend
-frame_id
-trajectory_ref
-calibration_version
-source_dataset_ref
-artifact_ref
-metrics
-created_at
-```
+## Evidence Contract
 
-### SpatialEntity
+状态只能向前推进：`SIM_PASS -> HIL_PASS -> REAL_PASS`。
 
-```text
-entity_id
-semantic_label
-embedding_ref
-pose
-bounds
-confidence
-first_seen
-last_seen
-map_version
-evidence_observation_refs
-```
+HIL/REAL 必须记录 Git commit、hardware revision、config、telemetry、视频、尝试次数和成功次数；REAL 还要记录每次失败原因。每个物理能力只有 `REAL_PASS` 可以标记 DONE。
 
-Spatial Memory 依赖统一 frame 与实体接口，不依赖 3DGS 内部数据结构。
+## Agent 边界
 
-## Skill Contract
-
-| 字段 | 说明 |
-|---|---|
-| `name` / `version` | 稳定标识 |
-| `preconditions` | 执行前条件 |
-| `inputs` | 结构化参数 |
-| `progress` | 进度与 telemetry reference |
-| `result` | `success/failure/cancelled/timeout` |
-| `failure_code` | 供 Agent 重规划 |
-| `required_capabilities` | 避免写死本体 |
-
-长时 Skill 必须支持取消、超时和进度事件；执行失败返回机器可读 failure code，不只返回自然语言。
-
-## CapabilityManifest
-
-Gateway 只能暴露 manifest 声明的能力。最小字段：
-
-```text
-device_id
-embodiment_type
-contract_version
-capabilities[]
-skill_versions{}
-sensor_streams[]
-safety_state
-allowed_permission_levels[]
-```
-
-## ControlLease
-
-物理写操作必须持有有效 lease：
-
-```text
-lease_id
-subject
-device_id
-scope
-issued_at
-expires_at
-approval_policy
-revocation_state
-```
-
-scope 不允许使用无限制通配；lease 过期、断线或安全状态变化时，本地 runtime 立即撤销执行权。
-
-## ExecutionReceipt
-
-每次真机 Tool/Skill 调用输出可审计回执：
-
-```text
-request_id
-tool_or_skill
-version
-lease_id
-started_at
-finished_at
-result
-failure_code
-telemetry_ref
-media_refs[]
-map_artifact_refs[]
-safety_events[]
-runtime_version
-```
-
-## 外部 Agent 权限面
-
-| 类别 | Tool 示例 | 默认权限 |
-|---|---|---|
-| 观察 | `get_robot_state`、`get_health`、`camera_snapshot` | `OBSERVE` |
-| 空间 | `get_map_status`、`query_spatial_memory` | `OBSERVE` |
-| 仿真 | `simulate_task`、`dry_run` | `SIMULATE` |
-| 动作 | `stand`、`recover`、`navigate_to`、`explore`、`inspect` | `PHYSICAL` + lease/approval |
-| 安全 | `stop` | 高优先级独立路径 |
-| 永久禁止 | `set_joint_angle`、`set_torque`、`raw_bus_write` | 不暴露 |
-
-验证等级固定为 `OBSERVE -> SIMULATE -> PROPOSE -> EXECUTE_SAFE_SKILL`；新 Agent / Tool 固定经过 `SIM -> replay -> HIL -> 支架/软垫 -> PHYSICAL`。
+未来 Gateway 只暴露 `stand`、`recover`、`walk_to` 等白名单 Skill。`set_joint_angle`、`set_torque` 和 `raw_bus_write` 永久不对 Agent 暴露；写操作必须有 scope、ControlLease、approval 与 ExecutionReceipt。

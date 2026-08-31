@@ -3,6 +3,8 @@
 日期：2026-08-31
 结论：**官方 14DOF 基线已真实训练并通过固定直行验收；自有 10DOF G1 仍未通过。**
 
+> V0.4 注：本文保留实验发生时的 G0/G1 命名；当前路线将该仿真基线归入 H0，当前 Gate 为 H1 Hardware Qualification。训练数据与结论不变。
+
 ## 目标与边界
 
 本实验把 G0 的 5 iteration 链路 smoke 扩展为可播放、可量化评估的正式步态训练。训练对象仍是外置、固定 commit 的官方 Microduck 14DOF task，不是本项目尚未建立的自有 10DOF 模型，也不是 Sim2Real 或真机结果。
@@ -112,4 +114,4 @@ bash scripts/run_upstream_walk_training.sh \
 
 ## 后续
 
-这次结果证明 GPU 训练、checkpoint 选择、定量评估和高清回放链路可用。G1 下一步仍是建立自有 10DOF MJCF 与 Policy Contract，然后复用同样的 smoke、长训练、固定命令验收和 ONNX CPU replay 流程。
+这次结果证明 GPU 训练、checkpoint 选择、定量评估和高清回放链路可用。V0.4 先在 H1/H2 获取执行器与单腿实测数据，再建立自有 10DOF MJCF 与 Policy Contract，并复用同样的 smoke、长训练、固定命令验收和 ONNX CPU replay 流程。

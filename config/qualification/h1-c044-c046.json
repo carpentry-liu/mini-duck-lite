@@ -1,0 +1,29 @@
+{
+  "schema_version": "actuator-qualification/v1",
+  "gate": "H1",
+  "control_hz": 50,
+  "step_tests": {
+    "angles_deg": [10, 30, 60],
+    "repetitions": 20,
+    "settle_seconds": 1.0
+  },
+  "velocity_test": {
+    "travel_deg": 60,
+    "repetitions": 20
+  },
+  "thermal_test": {
+    "duration_seconds": 1800,
+    "amplitude_deg": 20,
+    "period_seconds": 2.0
+  },
+  "disconnect_test": true,
+  "required_channels": [
+    "position",
+    "velocity",
+    "current",
+    "voltage",
+    "temperature",
+    "latency",
+    "packet_loss"
+  ]
+}

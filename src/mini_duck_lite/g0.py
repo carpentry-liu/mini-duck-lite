@@ -69,12 +69,12 @@ def build_report(runner: Runner = _probe, *, require_gpu: bool = True) -> dict[s
     required = checks if require_gpu else checks[:2]
     return {
         "project": "Mini Duck Physical AI Platform",
-        "project_version": "0.3",
+        "project_version": "0.4",
         "current_gate": CURRENT_GATE,
         "last_passed_gate": LAST_PASSED_GATE,
         "gate_passed": False,
         "g0_evidence": G0_EVIDENCE,
-        "scope": "local prerequisites only; this command does not execute the current G1",
+        "scope": "local prerequisites only; this command does not execute the current H1",
         "platform": platform.platform(),
         "python": platform.python_version(),
         "python_executable": sys.executable,

@@ -1,172 +1,199 @@
 # Mini Duck Physical AI Platform
 
-一个以低成本双足机器人为第一载体的 Physical AI 实验平台：先让身体可靠行动，再理解空间，最后让不同 AI Agent 通过安全、标准化接口使用真实机器人。
+一个从真实双足机器人出发的 Physical AI 工程：先把执行器、机械、供电和步态做可靠，再逐步加入视觉、空间理解与受控 Agent。
 
-Duck V0.1 是第一种 embodiment，目标为 10DOF 双腿、自主站立与行走、跌倒恢复、视觉找人和安全靠近。平台本身不写死到“小鸭外壳”或 10 个关节；未来的定位、地图、Spatial Memory、Skill Router 与 Agent Gateway 应能复用于轮式、四足等本体。
+当前版本：**V0.4 Hardware-First** ｜ 当前 Gate：**H1 Hardware Qualification** ｜ H0 上游仿真基线：**已通过**
 
-## 当前状态
+## 这个项目想做什么
 
-**当前 Gate：G1 · 自有 10DOF 仿真 Walk。G0 已于 2026-08-31 通过。**
+最终目标不是做一个只能播放动作的鸭子模型，而是做一台可以在真实环境中完成闭环任务的机器人：
 
-G0 已完成：
+> 上电 → 自主站立 → 双足行走 → 发现人 → 主动靠近 → 被轻推倒 → 自主恢复 → 继续任务
 
-- 固定 Microduck RL、Open Duck Playground 与 MuJoCo 参考 commit；
-- 检查 WSL2、Python、uv、Git、GPU 等开发环境；
-- 复现官方 task registry、CPU tests、viewer/policy 与 GPU 训练；
-- 保存真实命令、版本、日志、显存和失败证据。
-
-下一步进入 G1：建立自有 10DOF MJCF、锁定 Policy Contract，并训练可评估的站立/行走策略。硬件采购、SLAM/3DGS 与外部 Agent 真机写操作仍不在当前 Gate。
-
-### 启动与训练的真实状态
-
-| 项目 | 状态 | 说明 |
-|---|---|---|
-| WSL2 / Python / uv / Git / NVIDIA GPU 检查 | ✅ 已完成 | 已在目标电脑实测，环境审计结果见 `docs/experiments/` |
-| Microduck RL 固定版本与任务入口 | ✅ 已配置 | 已固定上游 commit 和 `Mjlab-Velocity-Flat-MicroDuck` task ID |
-| 机器人初始姿态加载与仿真启动 | ✅ 已完成 | 官方 HOME_FRAME、reset/startup events 与 CUDA 仿真已运行 |
-| 官方 checkpoint 加载与策略推理 | ✅ 已完成 | `model_4.pt` 已通过官方 `play` 加载并在 native viewer 运行 |
-| 64 env / 5 iteration 最小训练 | ✅ 已完成 | 7,680 step；生成 `model_0.pt`、`model_4.pt` 与 ONNX |
-| 4,096 env / 5 iteration 并行训练 | ✅ 已完成 | 491,520 step；GPU 峰值 70%，峰值显存约 6,378 MiB |
-| 官方 4,096 env 正式行走训练 | ✅ 已完成 | 训练至第 1,048 轮 / 103.1M step；选择通过验收的 `model_1000.pt` |
-| 固定直行量化评估与高清回放 | ✅ 已完成 | 两组 seed 均 128/128 不摔；0 NaN；5 秒 720p 固定命令视频 |
-| 自有 10DOF 强化学习训练 | ⏳ 尚未开始 | 当前 G1 主任务；上游 14DOF smoke 不能冒充自有策略 |
-
-G0 链路证据见 [`2026-08-31-g0-upstream-gpu-training.md`](docs/experiments/2026-08-31-g0-upstream-gpu-training.md)，正式步态证据见 [`2026-08-31-upstream-walk-training.md`](docs/experiments/2026-08-31-upstream-walk-training.md)。5 iteration smoke 只证明链路；正式结论来自 98.4M step checkpoint、固定命令量化评估和真实回放。上述模型仍是官方 14DOF，不代表自有 10DOF G1 已完成。
-
-## 强化学习到底在训练什么
-
-训练目标是得到一个实时控制策略：输入机器人当前姿态、关节状态和“想往哪里走”，输出 14 个关节的下一步动作。它不是记住一段固定动画，而是通过仿真试错学习在不同速度、摩擦、质量误差和外力下保持平衡。
-
-```mermaid
-flowchart LR
-  C[目标速度 / 转向] --> O[61 维观测]
-  S[关节 / IMU / 接触] --> O
-  O --> P[同一个共享策略]
-  P --> A[14 维关节动作]
-  A --> E[4096 个 GPU 并行机器人]
-  E --> R[前进 · 直立 · 少摔 · 少打滑]
-  R --> U[PPO 更新策略]
-  U --> P
-```
-
-4,096 个环境不是 4,096 个不同模型，而是 4,096 只同步试错的虚拟小鸭，共同更新同一套策略参数。正式训练选择第 1,000 轮 checkpoint 时累计 98,402,304 step，单轮吞吐 36,392 step/s；GPU 平均利用率 57.94%、峰值 88%，峰值显存 6,934 MiB。模型通过固定直行验收后提前停止，避免机械跑满上限。
-
-## 平台分层
+Duck 是第一种 embodiment。项目真正沉淀的是可复用的硬件描述、训练方法、安全 runtime、空间数据和 Skill/Agent 接口；将来换成轮式或四足，上层能力仍能复用。
 
 ```mermaid
 flowchart TB
-  A[Claude / Codex / ChatGPT / Local Agent] --> G[Agent Gateway\nMCP first · MHS-ready]
-  G --> R[Embodied Agent / Skill Router]
-  R --> S[Skills + Spatial Intelligence]
-  S --> P[Perception / Localization / Mapping]
-  S --> L[Locomotion + Safe Runtime]
-  L --> H[Embodiment / Hardware]
+  A[真实执行器/IMU/机械数据] --> B[10DOF HardwareManifest + ActuatorProfile]
+  B --> C[WSL2 · MuJoCo · GPU 强化学习]
+  C --> D[ONNX + Policy Contract]
+  D --> E[CPU replay → HIL → 支架测试]
+  E --> F[Pi Zero 2 W · 50 Hz Safe Runtime]
+  F --> G[真实 10DOF Duck]
+  G --> H[视觉 / Spatial AI / Whitelisted Skills]
+  H --> I[Claude / Codex / Local Agent]
 ```
 
-硬实时控制、感知定位、Skill 和 Agent 分属不同频率与故障域。Agent 只能调用白名单 Skill；50 Hz 控制环不依赖 LLM、网络或地图优化。
+V0.4 的关键变化是 **No Hardware, No Done**：仿真、mock 和视频可以作为中间证据，但站立、行走、恢复、测绘或 Agent 控制只有在真实 Duck 上通过才能标记完成。
 
-## 本机快速检查
+## 为什么先测硬件，再继续训练自有模型
 
-在 PowerShell 中：
+同叫 STS3215 的舵机存在不同减速比和速度/扭矩特性。V0.4 第一批只对比：
+
+- `STS3215-C044`：1:191，偏负载；
+- `STS3215-C046`：1:147，偏速度；
+- `BNO085`：新设计的主 IMU；`BNO055` 只保留兼容接口。
+
+真实 step response、速度、温升、电流、延迟、deadband/backlash 和断连恢复会回写到 `ActuatorProfile`，再进入 10DOF MJCF、domain randomization 和真机 soft limit。这样训练出来的策略才有明确的 Sim2Real 对象。
+
+## 当前真实进度
+
+| 能力 | 状态 | 说明 |
+|---|---|---|
+| WSL2 Ubuntu + RTX GPU 训练环境 | ✅ 已实测 | Ubuntu 24.04.3、Python 3.12.3、RTX 5060 Ti 16 GB |
+| 官方 Microduck 14DOF 长训练 | ✅ 已完成 | 4,096 env，103.1M step，GPU 平均/峰值 57.94%/88% |
+| 固定直行量化评估 | ✅ 已通过 | `model_1000.pt`，128/128 不摔，0 NaN |
+| V0.4 HardwareManifest | ✅ 已实现 | 10DOF joint order、C044/C046、BNO085、TBD_MEASURE |
+| H1 qualification logger | ✅ mock 可运行 | 50 Hz、CSV/JSON；mock 只能产生 `SIM_PASS` |
+| ServoBus / ImuBackend | ✅ 基础完成 | mock、BNO085、BNO055 compatibility；真实 STS3215 backend 待硬件 |
+| 50 Hz 安全 runtime | ✅ mock 基础完成 | timeout、deadline、IMU stale/NaN、断连、soft-limit |
+| 自有 10DOF RL 策略 | ⏳ 未完成 | 官方 14DOF policy 不能下发给目标硬件 |
+| 真实舵机/单腿/全身 | ⏳ 未接入 | 等 H1 实物资格测试，不冒充 HIL/REAL |
+
+正式训练证据见 [`2026-08-31-upstream-walk-training.md`](docs/experiments/2026-08-31-upstream-walk-training.md)。这次结果证明训练链路能用，不代表 10DOF 真机已经会走。
+
+## 强化学习是在 WSL2 里训练的吗
+
+**是。** 训练运行在 Windows 11 的 WSL2 Ubuntu 中，NVIDIA GPU 通过 WSL CUDA 提供给 PyTorch/MuJoCo。PowerShell 负责启动命令和管理文件，不执行 PPO 本身。
+
+### 本机目录
+
+| 内容 | Windows | WSL2 |
+|---|---|---|
+| 当前仓库 | `D:\vibe_code\02_sys3d\mini-duck-lite` | `/mnt/d/vibe_code/02_sys3d/mini-duck-lite` |
+| Microduck RL 源码 | `D:\vibe_code\02_sys3d\_upstream\microduck_rl` | `/mnt/d/vibe_code/02_sys3d/_upstream/microduck_rl` |
+| 正式训练 checkpoint | `D:\vibe_code\02_sys3d\_upstream\microduck_rl\logs\rsl_rl\velocity\2026-08-31_17-15-10_walk-baseline-4096x4000-20260831\model_1000.pt` | `/mnt/d/vibe_code/02_sys3d/_upstream/microduck_rl/logs/rsl_rl/velocity/2026-08-31_17-15-10_walk-baseline-4096x4000-20260831/model_1000.pt` |
+| 训练/GPU/评估/视频日志 | `D:\vibe_code\02_sys3d\mini-duck-lite\artifacts\walk-training-2026-08-31-run2` | `/mnt/d/vibe_code/02_sys3d/mini-duck-lite/artifacts/walk-training-2026-08-31-run2` |
+
+完整路径、训练命令和调参说明见 [`docs/WSL2_TRAINING.md`](docs/WSL2_TRAINING.md)。
+
+### 后续自己调训练策略，主要改哪里
+
+当前官方参考代码位于外置 Microduck RL checkout：
+
+| 修改目标 | 文件 |
+|---|---|
+| 关节、执行器、HOME_FRAME | `src/mjlab_microduck/robot/microduck_constants.py` |
+| MJCF、碰撞、质量和几何 | `src/mjlab_microduck/robot/microduck/*.xml` |
+| reward、命令范围、DR、curriculum | `src/mjlab_microduck/tasks/microduck_velocity_env_cfg.py` |
+| 自定义 reward/reset/观测函数 | `src/mjlab_microduck/tasks/mdp.py` |
+| 训练 CLI | `src/mjlab_microduck/train_cli.py` |
+| ONNX 导出 | `scripts/export.py` |
+
+固定上游目录用于复现，脚本会拒绝 dirty checkout。自有 10DOF 应在个人 fork/新分支开发，重新固定 commit；先 64 env smoke，再扩大到 4,096 env，并沿用本仓库的 GPU CSV、TensorBoard/W&B offline、checkpoint 量化评估和视频证据。
+
+## 安装 V0.4 开发工具
+
+在 PowerShell 中调用 WSL2：
 
 ```powershell
-wsl -d Ubuntu -- bash -lc 'cd /mnt/d/vibe_code/02_sys3d/mini-duck-lite && bash scripts/wsl_bootstrap.sh'
-wsl -d Ubuntu -- bash -lc 'cd /mnt/d/vibe_code/02_sys3d/mini-duck-lite && uv run mini-duck-g0'
+wsl -d Ubuntu -- bash -lc 'cd /mnt/d/vibe_code/02_sys3d/mini-duck-lite && uv sync --all-groups'
+wsl -d Ubuntu -- bash -lc 'cd /mnt/d/vibe_code/02_sys3d/mini-duck-lite && uv run pytest'
 ```
 
-输出是环境审计 JSON，只表示本机前置条件；G0 的真实训练与播放结果以实验记录为准。
-
-## 上游 G0 验证
-
-先在本仓库之外检出 `docs/UPSTREAM.md` 固定的 Microduck RL commit，然后执行：
+检查 HardwareManifest。返回 `valid=true`、`runtime_ready=false` 是当前正确结果：格式有效，但真实 bus ID、软限位、执行器分配和 HIL 数据尚未完成。
 
 ```bash
-bash scripts/run_g0_upstream_smoke.sh /path/to/microduck_rl
+uv run mini-duck-hardware-audit config/hardware/reference-prototype-a.json
 ```
 
-该命令验证 commit、依赖、task registry 和上游 CPU tests。只有明确授权 GPU 小规模训练时才执行：
+运行一次低成本 mock 资格测试并生成 CSV/JSON 日志：
 
 ```bash
-bash scripts/run_g0_upstream_smoke.sh /path/to/microduck_rl --train-smoke
+uv run mini-duck-qualify \
+  config/qualification/h1-c044-c046.json \
+  artifacts/h1-c044-mock-quick \
+  --sku STS3215-C044 --backend mock --quick
 ```
 
-本机已完成一次上述 smoke，并用生成的 checkpoint 启动官方 viewer。重新执行时，实际命令与结果仍必须记录到 `docs/experiments/`，不能用自制 tether 模型替代。
-
-## 官方行走正式训练与评估
-
-正式训练会校验外置上游 commit、记录 manifest/终端/GPU CSV，并启用 TensorBoard 与 W&B offline：
+运行 50 Hz mock runtime：
 
 ```bash
-bash scripts/run_upstream_walk_training.sh \
-  /path/to/microduck_rl \
-  /path/to/artifacts/walk-training \
-  --envs 4096 --iterations 4000 --seed 42
+uv run mini-duck-runtime \
+  config/runtime/mock-10dof.json \
+  artifacts/runtime-mock.jsonl \
+  --backend mock --cycles 100
 ```
 
-用固定命令对 checkpoint 做可重复验收；该脚本须从 Microduck RL 的 `uv` 环境运行：
+这些命令验证配置、logger 和 safety state，不会连接真实舵机，也不会生成 HIL/REAL 结论。
 
-```bash
-uv run python /path/to/mini-duck-lite/scripts/evaluate_upstream_walk.py \
-  /path/to/model_1000.pt /path/to/evaluation.json \
-  --num-envs 128 --steps 500 --burn-in-steps 50 \
-  --command-x 0.25 --device cuda:0
+## 强化学习结果如何部署到真实硬件
+
+部署不是把 `.pt` 文件直接拷给舵机，而是经过以下链路：
+
+1. **H1/H2 实测**：得到真实 actuator、IMU、joint sign/zero/limit、供电和机械参数；
+2. **自有 10DOF 训练**：在 WSL2 中训练与目标实体 joint order 一致的策略；
+3. **导出 ONNX**：绑定 observation normalizer、action scale、50 Hz、训练 commit 和模型哈希；
+4. **CPU replay**：确认 PyTorch、ONNX 与 MuJoCo replay 输出一致；
+5. **生成 Policy Bundle**：`mini-duck-package-policy` 会拒绝 14DOF 或缺少 contract 的模型；
+6. **HIL**：先单舵机、再一条腿、再支架/软垫全身；
+7. **部署 Pi Zero 2 W**：Pi 本地执行 50 Hz ONNX inference、watchdog、telemetry 和 servo/IMU I/O；
+8. **REAL Gate**：外部限流电源站立通过后，才进入电池无绳行走。
+
+真机每 20 ms 的控制链为：
+
+```text
+读取 STS3215 + BNO085
+  → 按 joint order 构造 observation
+  → 使用训练时 normalizer
+  → ONNX inference
+  → action scale / sign / zero / soft limit
+  → 写入舵机
+  → telemetry + watchdog
 ```
 
-增加 `--video-dir /path/to/video` 可在同一固定命令下生成 1280×720 回放。训练上限不是完成标准；checkpoint 只有通过不摔、速度、净横移、净偏航和 NaN 验收后才能被选中。
+command timeout、sensor stale、NaN、舵机断连、超限或 deadline miss 时，本地 runtime 必须独立进入 safe state；LLM、VLA、网络和地图不在 50 Hz hard loop 中。完整电气、目录与发布流程见 [`docs/HARDWARE_DEPLOYMENT.md`](docs/HARDWARE_DEPLOYMENT.md)。
+
+## 仓库结构
+
+```text
+config/
+├── hardware/             # HardwareManifest
+├── qualification/        # H1 C044/C046 测试计划
+├── runtime/              # 50 Hz runtime 配置
+└── policy/               # 10DOF Policy Contract 模板
+src/mini_duck_lite/
+├── manifest.py           # 配置校验与 runtime readiness
+├── hardware.py           # ServoBus / ImuBackend / mock
+├── qualification.py      # CSV/JSON 资格测试 logger
+├── runtime.py            # 50 Hz safety foundation
+├── evidence.py           # SIM/HIL/REAL contract
+└── policy_bundle.py      # ONNX 部署包
+scripts/                  # WSL2 复现、正式训练与 checkpoint 评估
+docs/                     # PRD、架构、训练、部署、Gate 和实验记录
+```
+
+## Gate 路线
+
+```text
+H0 仿真基线（已通过）
+ → H1 两颗候选舵机 + IMU
+ → H2 一条 5DOF 实体腿
+ → H3 10DOF 全身 Stand
+ → H4 无绳 2 m Walk
+ → H5 Recovery
+ → H6 找人并靠近
+ → H7+ 地形 / SLAM / 3DGS / Spatial / Agent / VLA
+```
+
+详细预算、通过条件和止损点见 [`docs/ROADMAP.md`](docs/ROADMAP.md)。
 
 ## 文档入口
 
-- [产品范围](docs/PRD.md)
+- [V0.4 产品执行版](docs/PRD.md)
 - [系统架构](docs/ARCHITECTURE.md)
-- [核心接口](docs/INTERFACES.md)
-- [Gate 路线](docs/ROADMAP.md)
+- [硬件与策略接口](docs/INTERFACES.md)
+- [WSL2 强化学习开发](docs/WSL2_TRAINING.md)
+- [真机部署链路](docs/HARDWARE_DEPLOYMENT.md)
+- [Hardware-First Roadmap](docs/ROADMAP.md)
 - [当前进度](docs/PROGRESS.md)
-- [决策记录](docs/DECISIONS.md)
-- [上游基线](docs/UPSTREAM.md)
+- [上游版本与许可证](docs/UPSTREAM.md)
+- [实验记录](docs/experiments/README.md)
 
-## 开发看板
+## 上游参考
 
-### 已完成
+- [Microduck RL](https://github.com/pollen-robotics/microduck_rl)：mjlab/MuJoCo 强化学习基线；
+- [Open Duck Mini v2](https://github.com/apirrone/Open_Duck_Mini/tree/v2)：约 42 cm 机械、BOM 与 Sim2Real 参考；
+- [Open Duck Mini Runtime](https://github.com/apirrone/Open_Duck_Mini_Runtime)：Pi Zero 2 W、IMU、motor controller、offset 和 ONNX runtime 范式。
 
-- [x] 按 Physical AI Platform V0.3 重构产品范围、分层架构和 Gate 路线；
-- [x] 固定 Microduck RL、Open Duck Playground 与 MuJoCo 上游版本；
-- [x] 完成目标电脑的 WSL2、Python、uv、Git、GPU 环境审计；
-- [x] 提供 G0 命令行审计工具、自动化测试和可复现构建；
-- [x] 提供上游 registry、CPU tests 与最小训练 smoke 的统一脚本入口；
-- [x] 建立实验记录目录，区分“已实测结果”和“计划执行项”；
-- [x] 完成官方 checkpoint 播放和 64 环境训练 smoke；
-- [x] 完成 4,096 个同步环境的 GPU 并行训练验证；
-- [x] 完成官方 14DOF 103.1M step 正式训练并选择 `model_1000.pt`；
-- [x] 完成双 seed 固定直行量化评估和 720p 真实回放。
-
-### G0 验收：已完成
-
-- [x] 在仓库外检出 Microduck RL 固定 commit，并完成 `uv sync`；
-- [x] 运行 `uv run list-envs`，确认官方任务已正确注册；
-- [x] 运行上游 CPU tests，结果为 154 passed、1 skipped；
-- [x] 启动官方 viewer，执行 HOME_FRAME reset 与 CUDA 仿真；
-- [x] 使用 smoke checkpoint 启动官方 policy 推理；
-- [x] 完成 64 env / 5 iteration 最小训练；
-- [x] 完成 4,096 env / 5 iteration GPU 并行负载验证；
-- [x] 记录命令、耗时、显存、训练指标、checkpoint 和失败信息。
-
-### TODO：当前 Gate G1
-
-- [ ] 基于真实结构参数建立自有 10DOF MJCF 与执行器配置；
-- [ ] 定义可复现的中立站立姿态、reset 流程、关节限位和自碰撞规则；
-- [ ] 锁定 observation、action、控制频率和 Policy Contract；
-- [ ] 设计站立、行走、扰动恢复 reward 与 curriculum；
-- [ ] 增加摩擦、质量、时延和执行器误差的 domain randomization；
-- [ ] 完成长时间 PPO 训练、checkpoint 评估与 ONNX CPU replay。
-
-详细 Gate 验收条件以 [`docs/ROADMAP.md`](docs/ROADMAP.md) 为准；README 只展示最近状态。
-
-## 当前明确不做
-
-- 不把持续遥控作为 Hero Demo 输入；
-- 不让 LLM/VLA 直接输出舵机角度；
-- 不把 5 iteration smoke 描述成“已经学会稳定走路”；
-- 不在 G1 完成前购买整套舵机；
-- 不把 3DGS 写死为导航地图；
-- 不以卡通几何代理冒充 Microduck/Open Duck 工业结构；
-- 不将未实测物理参数包装成 Sim2Real 结果。
+上游代码和模型资产保持仓库外置并固定 commit；硬件参数与 joint calibration 不直接照抄，必须由本项目 H1/H2 实测确认。

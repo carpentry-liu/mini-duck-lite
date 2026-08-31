@@ -1,0 +1,69 @@
+{
+  "schema_version": "hardware-manifest/v1",
+  "platform_version": "0.4",
+  "hardware_revision": "reference-prototype-a-pre-h1",
+  "qualification_gate": "H1",
+  "embodiment": {
+    "name": "reference-prototype-a",
+    "active_joint_count": 10,
+    "joint_order": [
+      "left_hip_yaw",
+      "left_hip_roll",
+      "left_hip_pitch",
+      "left_knee",
+      "left_ankle",
+      "right_hip_yaw",
+      "right_hip_roll",
+      "right_hip_pitch",
+      "right_knee",
+      "right_ankle"
+    ]
+  },
+  "actuators": {
+    "selection_state": "TBD_MEASURE",
+    "candidates": [
+      {
+        "sku": "STS3215-C044",
+        "voltage_v": 7.4,
+        "gear_ratio": "1:191",
+        "bus_id": null,
+        "measurement_state": "TBD_MEASURE"
+      },
+      {
+        "sku": "STS3215-C046",
+        "voltage_v": 7.4,
+        "gear_ratio": "1:147",
+        "bus_id": null,
+        "measurement_state": "TBD_MEASURE"
+      }
+    ]
+  },
+  "joints": [
+    {"name": "left_hip_yaw", "bus_id": null, "actuator_sku": null, "soft_limit_rad": null},
+    {"name": "left_hip_roll", "bus_id": null, "actuator_sku": null, "soft_limit_rad": null},
+    {"name": "left_hip_pitch", "bus_id": null, "actuator_sku": null, "soft_limit_rad": null},
+    {"name": "left_knee", "bus_id": null, "actuator_sku": null, "soft_limit_rad": null},
+    {"name": "left_ankle", "bus_id": null, "actuator_sku": null, "soft_limit_rad": null},
+    {"name": "right_hip_yaw", "bus_id": null, "actuator_sku": null, "soft_limit_rad": null},
+    {"name": "right_hip_roll", "bus_id": null, "actuator_sku": null, "soft_limit_rad": null},
+    {"name": "right_hip_pitch", "bus_id": null, "actuator_sku": null, "soft_limit_rad": null},
+    {"name": "right_knee", "bus_id": null, "actuator_sku": null, "soft_limit_rad": null},
+    {"name": "right_ankle", "bus_id": null, "actuator_sku": null, "soft_limit_rad": null}
+  ],
+  "imu": {
+    "primary": "BNO085",
+    "compatibility": ["BNO055"],
+    "bus": "I2C_OR_UART_TBD_MEASURE",
+    "calibration_state": "TBD_MEASURE"
+  },
+  "compute": {
+    "low_level": "Raspberry Pi Zero 2 W",
+    "deployment_state": "PLANNED_H3",
+    "offboard": "existing-pc-gpu"
+  },
+  "power": {
+    "servo_bus_v": 7.4,
+    "full_body_peak_current_a": null,
+    "measurement_state": "TBD_MEASURE"
+  }
+}
