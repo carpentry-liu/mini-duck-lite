@@ -1,0 +1,105 @@
+<mujoco model="mini_duck_lite_v0_1">
+  <compiler angle="radian" autolimits="true" inertiafromgeom="true"/>
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast" cone="elliptic"/>
+
+  <visual>
+    <global azimuth="130" elevation="-18"/>
+    <rgba haze="0.15 0.15 0.15 1"/>
+  </visual>
+
+  <default>
+    <joint type="hinge" limited="true" damping="0.25" armature="0.002"/>
+    <geom condim="3" friction="0.9 0.03 0.001" solref="0.004 1"/>
+    <position ctrllimited="true" forcelimited="true" forcerange="-4 4" kp="35" kv="2.5"/>
+  </default>
+
+  <asset>
+    <texture name="floor_tex" type="2d" builtin="checker" width="256" height="256" rgb1="0.82 0.82 0.82" rgb2="0.94 0.94 0.94"/>
+    <material name="floor_mat" texture="floor_tex" texrepeat="4 4" reflectance="0.05"/>
+    <material name="duck_yellow" rgba="0.96 0.67 0.10 1"/>
+    <material name="joint_dark" rgba="0.20 0.22 0.25 1"/>
+    <material name="foot_orange" rgba="0.96 0.38 0.08 1"/>
+  </asset>
+
+  <worldbody>
+    <light name="key" pos="1 -1 2" dir="-1 1 -2" directional="true" diffuse="0.8 0.8 0.8"/>
+    <geom name="floor" type="plane" size="3 3 0.05" material="floor_mat"/>
+    <camera name="overview" mode="fixed" pos="0.95 -1.05 0.62" xyaxes="0.74 0.67 0 -0.24 0.26 0.94"/>
+
+    <body name="base" pos="0 0 0.34">
+      <freejoint name="root"/>
+      <geom name="torso" type="ellipsoid" size="0.105 0.075 0.09" mass="0.34" material="duck_yellow"/>
+      <geom name="beak" type="ellipsoid" pos="0.105 0 0.015" size="0.055 0.045 0.025" mass="0.025" material="foot_orange"/>
+      <site name="imu" pos="0 0 0.025" size="0.008" rgba="0.1 0.6 1 1"/>
+
+      <body name="left_hip_yaw_link" pos="0 0.055 -0.05">
+        <joint name="left_hip_yaw" axis="0 0 1" range="-0.60 0.60"/>
+        <geom type="sphere" size="0.028" mass="0.018" material="joint_dark"/>
+        <body name="left_hip_roll_link">
+          <joint name="left_hip_roll" axis="1 0 0" range="-0.45 0.45"/>
+          <geom type="sphere" size="0.026" mass="0.016" material="joint_dark"/>
+          <body name="left_upper_leg">
+            <joint name="left_hip_pitch" axis="0 1 0" range="-1.00 0.80"/>
+            <geom type="capsule" fromto="0 0 0 0 0 -0.12" size="0.024" mass="0.085" material="duck_yellow"/>
+            <body name="left_lower_leg" pos="0 0 -0.12">
+              <joint name="left_knee_pitch" axis="0 1 0" range="-0.10 1.45"/>
+              <geom type="capsule" fromto="0 0 0 0 0 -0.12" size="0.022" mass="0.075" material="duck_yellow"/>
+              <body name="left_foot" pos="0 0 -0.12">
+                <joint name="left_ankle_pitch" axis="0 1 0" range="-0.70 0.70"/>
+                <geom name="left_foot_geom" type="box" pos="0.035 0 -0.025" size="0.065 0.038 0.025" mass="0.055" material="foot_orange"/>
+                <site name="left_foot_site" type="box" pos="0.035 0 -0.050" size="0.060 0.034 0.002" rgba="0 0 0 0"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+
+      <body name="right_hip_yaw_link" pos="0 -0.055 -0.05">
+        <joint name="right_hip_yaw" axis="0 0 1" range="-0.60 0.60"/>
+        <geom type="sphere" size="0.028" mass="0.018" material="joint_dark"/>
+        <body name="right_hip_roll_link">
+          <joint name="right_hip_roll" axis="1 0 0" range="-0.45 0.45"/>
+          <geom type="sphere" size="0.026" mass="0.016" material="joint_dark"/>
+          <body name="right_upper_leg">
+            <joint name="right_hip_pitch" axis="0 1 0" range="-1.00 0.80"/>
+            <geom type="capsule" fromto="0 0 0 0 0 -0.12" size="0.024" mass="0.085" material="duck_yellow"/>
+            <body name="right_lower_leg" pos="0 0 -0.12">
+              <joint name="right_knee_pitch" axis="0 1 0" range="-0.10 1.45"/>
+              <geom type="capsule" fromto="0 0 0 0 0 -0.12" size="0.022" mass="0.075" material="duck_yellow"/>
+              <body name="right_foot" pos="0 0 -0.12">
+                <joint name="right_ankle_pitch" axis="0 1 0" range="-0.70 0.70"/>
+                <geom name="right_foot_geom" type="box" pos="0.035 0 -0.025" size="0.065 0.038 0.025" mass="0.055" material="foot_orange"/>
+                <site name="right_foot_site" type="box" pos="0.035 0 -0.050" size="0.060 0.034 0.002" rgba="0 0 0 0"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <equality>
+    <weld name="debug_tether" body1="base" active="false"/>
+  </equality>
+
+  <actuator>
+    <position name="left_hip_yaw_act" joint="left_hip_yaw" ctrlrange="-0.60 0.60"/>
+    <position name="left_hip_roll_act" joint="left_hip_roll" ctrlrange="-0.45 0.45"/>
+    <position name="left_hip_pitch_act" joint="left_hip_pitch" ctrlrange="-1.00 0.80"/>
+    <position name="left_knee_pitch_act" joint="left_knee_pitch" ctrlrange="-0.10 1.45"/>
+    <position name="left_ankle_pitch_act" joint="left_ankle_pitch" ctrlrange="-0.70 0.70"/>
+    <position name="right_hip_yaw_act" joint="right_hip_yaw" ctrlrange="-0.60 0.60"/>
+    <position name="right_hip_roll_act" joint="right_hip_roll" ctrlrange="-0.45 0.45"/>
+    <position name="right_hip_pitch_act" joint="right_hip_pitch" ctrlrange="-1.00 0.80"/>
+    <position name="right_knee_pitch_act" joint="right_knee_pitch" ctrlrange="-0.10 1.45"/>
+    <position name="right_ankle_pitch_act" joint="right_ankle_pitch" ctrlrange="-0.70 0.70"/>
+  </actuator>
+
+  <sensor>
+    <gyro name="imu_gyro" site="imu"/>
+    <accelerometer name="imu_accelerometer" site="imu"/>
+    <framequat name="imu_orientation" objtype="site" objname="imu"/>
+    <touch name="left_foot_contact" site="left_foot_site"/>
+    <touch name="right_foot_contact" site="right_foot_site"/>
+  </sensor>
+</mujoco>

@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mini-duck-lite"
+version = "0.1.0"
+description = "A staged 10DOF biped simulation and Sim2Real project"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "mujoco>=3.3,<4",
+  "numpy>=2.0,<3",
+  "pillow>=11,<13",
+]
+
+[project.scripts]
+mini-duck-sim = "mini_duck_lite.simulation:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3,<9",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mini_duck_lite"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
