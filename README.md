@@ -36,6 +36,14 @@ V0.4 的关键变化是 **No Hardware, No Done**：仿真、mock 和视频可以
 
 真实 step response、速度、温升、电流、延迟、deadband/backlash 和断连恢复会回写到 `ActuatorProfile`，再进入 10DOF MJCF、domain randomization 和真机 soft limit。这样训练出来的策略才有明确的 Sim2Real 对象。
 
+## 现在要不要买硬件
+
+**可以买第一批 H1 资格测试套件，但不要一次买满 10 个舵机。** 当前软件已经把硬件描述、测试日志、接口、安全状态和证据等级准备好；真实 STS3215 backend 与 BNO085 标定必须等设备到货后联调。
+
+现在只采购：`C044 ×1`、`C046 ×1`、`Bus Servo Adapter (A) ×1`、`BNO085 ×1`，以及 7.4 V 限流电源、保险/物理断电和必要线材。H1 实测确定执行器分配后，再补齐一条 5DOF 腿；单腿通过后，才扩到 10DOF 全身、Pi 和电池。
+
+完整 SKU 对比、关节分配假设、到货测试顺序、安全温度和分阶段采购触发器见 [`docs/HARDWARE_PURCHASE.md`](docs/HARDWARE_PURCHASE.md)。
+
 ## 当前真实进度
 
 | 能力 | 状态 | 说明 |
@@ -183,6 +191,7 @@ H0 仿真基线（已通过）
 - [V0.4 产品执行版](docs/PRD.md)
 - [系统架构](docs/ARCHITECTURE.md)
 - [硬件与策略接口](docs/INTERFACES.md)
+- [H1 硬件采购与资格测试](docs/HARDWARE_PURCHASE.md)
 - [WSL2 强化学习开发](docs/WSL2_TRAINING.md)
 - [真机部署链路](docs/HARDWARE_DEPLOYMENT.md)
 - [Hardware-First Roadmap](docs/ROADMAP.md)

@@ -20,6 +20,7 @@ V0.4 已将项目切换为 Hardware-First。官方 Microduck 14DOF 的 103.1M st
 - 10DOF ONNX policy bundle 会校验 joint order、action size、normalizer、control rate、training commit 和 SHA256；
 - SIM/HIL/REAL evidence contract 会阻止 mock 冒充真机完成；
 - WSL2 训练目录、调参入口和 Pi/真机部署步骤已单独成文。
+- H1 第一批采购清单、C044/C046 分配假设、到货顺序和后续扩批触发器已固定；软件已达到采购资格测试样机的条件。
 
 ## H1 尚未完成
 
@@ -31,7 +32,7 @@ V0.4 已将项目切换为 Hardware-First。官方 Microduck 14DOF 的 103.1M st
 
 ## 下一任务
 
-准备第一批 H1 硬件后，先核对外壳/包装完整后缀，再使用 qualification CLI 接入真实 STS3215 backend；完成两颗候选舵机的 step、速度、30 min、温升、延迟与断连测试。H1 数据归档和选型通过后，才进入一条 5DOF 实体腿。
+按 [`HARDWARE_PURCHASE.md`](HARDWARE_PURCHASE.md) 采购第一批 H1 资格测试套件，不批量购买 10 个舵机。到货后先核对外壳/包装完整后缀，再为 qualification CLI 接入真实 STS3215 backend；完成两颗候选舵机的 step、速度、30 min、温升、延迟与断连测试。H1 数据归档和选型通过后，才进入一条 5DOF 实体腿。
 
 ## 环境提示
 

@@ -37,6 +37,7 @@ H0 的官方模型是 14DOF 参考，不是 V0.4 10DOF 真机策略。
 - [x] BNO085-first `ImuBackend` 与 BNO055 compatibility adapter 已实现；
 - [x] 50 Hz mock runtime 的 timeout、deadline、NaN、soft-limit 与断连安全基础已实现；
 - [x] SIM/HIL/REAL evidence contract 和 10DOF policy bundle gate 已实现；
+- [x] 第一批采购清单、候选分配假设、到货测试顺序与扩批触发器已成文；
 - [ ] 下单并核验 C044×1、C046×1、Bus Servo Adapter (A)×1、BNO085×1；
 - [ ] 真实执行 step/速度/30 min/断连测试；
 - [ ] 根据数据完成 `ActuatorProfile` 与 H1 Gate Review；
