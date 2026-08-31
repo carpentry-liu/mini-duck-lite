@@ -206,6 +206,7 @@ H0 仿真基线（已通过）
 - [系统架构](docs/ARCHITECTURE.md)
 - [硬件与策略接口](docs/INTERFACES.md)
 - [H1 硬件采购与资格测试](docs/HARDWARE_PURCHASE.md)
+- [完整硬件、工具与预算清单](docs/HARDWARE_BOM.md)
 - [WSL2 强化学习开发](docs/WSL2_TRAINING.md)
 - [真机部署链路](docs/HARDWARE_DEPLOYMENT.md)
 - [Hardware-First Roadmap](docs/ROADMAP.md)

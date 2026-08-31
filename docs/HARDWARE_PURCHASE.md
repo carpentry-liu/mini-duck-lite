@@ -6,6 +6,8 @@
 
 **现在可以买 H1 第一批资格测试硬件，但不要一次买满 10 个舵机。**
 
+从 H1 到完整 10DOF 样机的全部电子件、结构件、实验工具、价格区间、淘宝入口和累计预算统一维护在 [`HARDWARE_BOM.md`](HARDWARE_BOM.md)。本文件只定义 H1 的技术资格测试与放量条件。
+
 软件侧已经具备下单前应完成的最小准备：10DOF `HardwareManifest`、候选执行器配置、`ServoBus` / `ImuBackend` 接口、50 Hz qualification logger、安全 runtime 基础，以及 SIM/HIL/REAL 证据约束。实物到货后需要补的是真实 STS3215 通讯 backend、BNO085 总线校准和实测参数；这些工作依赖设备本身，不适合继续用 mock 猜测。
 
 ## 第一批只买这些
@@ -16,6 +18,7 @@
 | FEETECH `ST-3215-C046` | 1 | 完整后缀 `C046`、7.4 V、1:147 | 速度型候选执行器 |
 | Waveshare Bus Servo Adapter (A) | 1 | A 版、USB/UART 能连接 PC | H1 通讯与单舵机测试 |
 | BNO085 breakout | 1 | 确认为 BNO085，不用 BNO055 替代首选型号 | IMU 数据率、时间戳与标定测试 |
+| Raspberry Pi Pico / Pico 2 | 1 | 3.3 V IO、USB 可传数据 | H1 阶段将 BNO085 数据桥接到 PC |
 | 7.4 V 可限流台式电源 | 1 | 至少 5 A，优先 10 A；已有则不重复买 | H1 外部安全供电 |
 | 保险丝、急停/物理断电、线材和端子 | 1 套 | 16/18 AWG 主电源线、绝缘与应力释放 | 防短路和快速切断 |
 | 万用表 | 1 | 已有则不重复买 | 接线、压降与连续性检查 |
