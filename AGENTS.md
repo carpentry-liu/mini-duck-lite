@@ -11,9 +11,9 @@
 
 ## 当前唯一 Gate
 
-当前是 **G0：上游仿真基线复现**。只有官方 Microduck RL / Open Duck 的固定 commit、task registry、viewer/policy 与最小 smoke 在目标机器可复现后，才进入 G1 自有 10DOF 模型。
+**G0 已于 2026-08-31 通过。当前是 G1：自有 10DOF 仿真 Walk。** G0 证据见 `docs/experiments/2026-08-31-g0-upstream-gpu-training.md`；不得把 5-iteration smoke 描述为可用步态。
 
-以下内容当前只允许设计接口，不允许实施：自有 MJCF、PPO 长训练、舵机采购、HIL、真机控制、SLAM/3DGS、VLA/World Model、外部 Agent 真机写操作。
+G1 允许实施自有 MJCF、Policy Contract、reward/DR、PPO 训练、checkpoint 评估与 ONNX CPU replay。以下内容当前只允许设计接口，不允许实施：舵机采购、HIL、真机控制、SLAM/3DGS、VLA/World Model、外部 Agent 真机写操作。
 
 ## 工程原则
 

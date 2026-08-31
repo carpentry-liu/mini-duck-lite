@@ -21,18 +21,32 @@ Gate 是预算和范围的硬边界。未满足上一 Gate 的可复现验收，
 | D · G12/G13 | VLA / WAM Research | 按模型与算力核价 | 对照实验相对 baseline 有量化增益 |
 | E · G14 | Cross-Embodiment | 另行设计 | 第二本体复用高层 stack |
 
-## 当前 Gate：G0
+## G0：已于 2026-08-31 通过
 
 ### 验收清单
 
 - [x] WSL2 Ubuntu、Python、uv、Git 与 NVIDIA GPU 可识别；
 - [x] Microduck RL、Open Duck Playground、MuJoCo 固定 commit 已记录；
-- [ ] 固定 commit 的 Microduck RL 依赖安装可复现；
-- [ ] `uv run list-envs` 输出官方 task registry；
-- [ ] 官方 CPU tests 通过；
-- [ ] 官方 viewer/policy 使用有效 checkpoint 成功运行；
-- [ ] 64 env / 5 iteration 或上游等价最小训练 smoke 完成；
-- [ ] 命令、版本、日志、耗时、显存和失败记录入 `docs/experiments/`。
+- [x] 固定 commit 的 Microduck RL 依赖安装可复现；
+- [x] `uv run list-envs` 输出官方 task registry；
+- [x] 官方 CPU tests 通过；
+- [x] 官方 viewer/policy 使用有效 smoke checkpoint 成功运行；
+- [x] 64 env / 5 iteration 最小训练 smoke 完成；
+- [x] 4,096 env / 5 iteration GPU 并行负载验证完成；
+- [x] 命令、版本、日志、耗时、显存和失败记录入 `docs/experiments/`。
+
+通过证据：[`2026-08-31-g0-upstream-gpu-training.md`](experiments/2026-08-31-g0-upstream-gpu-training.md)。smoke checkpoint 只证明链路，不代表稳定步态。
+
+## 当前 Gate：G1
+
+### 验收清单
+
+- [ ] 自有 10DOF MJCF 的结构来源、joint order、axis、sign 和 limit 可追溯；
+- [ ] 中立站立姿态、reset、接触、自碰撞和自由落体测试通过；
+- [ ] Policy Contract 锁定 observation、action、normalizer、action scale 与 50 Hz 控制频率；
+- [ ] 64 env / 5 iteration 自有训练 smoke 无 NaN；
+- [ ] 长训练产出可重复 checkpoint，并通过固定命令集评估；
+- [ ] ONNX 携带 normalizer，并在 CPU MuJoCo replay 与 PyTorch 输出一致。
 
 ### 当前非目标
 

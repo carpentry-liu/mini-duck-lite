@@ -6,16 +6,16 @@ Duck V0.1 是第一种 embodiment，目标为 10DOF 双腿、自主站立与行�
 
 ## 当前状态
 
-**当前 Gate：G0 · 上游仿真基线复现。**
+**当前 Gate：G1 · 自有 10DOF 仿真 Walk。G0 已于 2026-08-31 通过。**
 
-本仓库目前只负责：
+G0 已完成：
 
 - 固定 Microduck RL、Open Duck Playground 与 MuJoCo 参考 commit；
 - 检查 WSL2、Python、uv、Git、GPU 等开发环境；
-- 提供官方 task registry、viewer/policy 与小规模训练 smoke 的可复现入口；
-- 保存真实命令、版本、日志和失败证据。
+- 复现官方 task registry、CPU tests、viewer/policy 与 GPU 训练；
+- 保存真实命令、版本、日志、显存和失败证据。
 
-G0 未通过前，不开始自有 10DOF MJCF、长时间 PPO、硬件采购、SLAM/3DGS 或外部 Agent 真机写操作。
+下一步进入 G1：建立自有 10DOF MJCF、锁定 Policy Contract，并训练可评估的站立/行走策略。硬件采购、SLAM/3DGS 与外部 Agent 真机写操作仍不在当前 Gate。
 
 ### 启动与训练的真实状态
 
@@ -23,15 +23,31 @@ G0 未通过前，不开始自有 10DOF MJCF、长时间 PPO、硬件采购、SL
 |---|---|---|
 | WSL2 / Python / uv / Git / NVIDIA GPU 检查 | ✅ 已完成 | 已在目标电脑实测，环境审计结果见 `docs/experiments/` |
 | Microduck RL 固定版本与任务入口 | ✅ 已配置 | 已固定上游 commit 和 `Mjlab-Velocity-Flat-MicroDuck` task ID |
-| 机器人初始姿态加载与仿真启动 | ⏳ 未实测 | 当前仓库没有自有机器人模型；尚未用官方 viewer 验证 reset 后的站立姿态、关节角和接触状态 |
-| 官方 checkpoint 加载与策略推理 | ⏳ 未执行 | 尚无经过本机验证的有效 checkpoint 和 viewer/policy 运行记录 |
-| 强化学习最小训练 | ⏳ 未执行 | 已提供 64 env / 5 iteration 命令入口，但尚未运行，未生成训练日志或 checkpoint |
-| 自有 10DOF 强化学习训练 | 🚫 尚未开始 | 属于 G1；必须在 G0 上游基线复现通过后开始 |
+| 机器人初始姿态加载与仿真启动 | ✅ 已完成 | 官方 HOME_FRAME、reset/startup events 与 CUDA 仿真已运行 |
+| 官方 checkpoint 加载与策略推理 | ✅ 已完成 | `model_4.pt` 已通过官方 `play` 加载并在 native viewer 运行 |
+| 64 env / 5 iteration 最小训练 | ✅ 已完成 | 7,680 step；生成 `model_0.pt`、`model_4.pt` 与 ONNX |
+| 4,096 env / 5 iteration 并行训练 | ✅ 已完成 | 491,520 step；GPU 峰值 70%，峰值显存约 6,378 MiB |
+| 自有 10DOF 强化学习训练 | ⏳ 尚未开始 | 当前 G1 主任务；上游 14DOF smoke 不能冒充自有策略 |
 
-因此，当前的“环境可用”不等于“机器人已经启动并完成强化学习训练”。执行
-`uv run mini-duck-g0` 只做只读环境审计；只有显式运行
-`scripts/run_g0_upstream_smoke.sh <microduck_rl_checkout> --train-smoke`
-才会触发上游的 5 iteration 最小训练。
+完整证据见 [`docs/experiments/2026-08-31-g0-upstream-gpu-training.md`](docs/experiments/2026-08-31-g0-upstream-gpu-training.md)。5 iteration 只证明环境、GPU、PPO、checkpoint 和播放链路可用，不代表已经得到稳定步态。
+
+## 强化学习到底在训练什么
+
+训练目标是得到一个实时控制策略：输入机器人当前姿态、关节状态和“想往哪里走”，输出 14 个关节的下一步动作。它不是记住一段固定动画，而是通过仿真试错学习在不同速度、摩擦、质量误差和外力下保持平衡。
+
+```mermaid
+flowchart LR
+  C[目标速度 / 转向] --> O[61 维观测]
+  S[关节 / IMU / 接触] --> O
+  O --> P[同一个共享策略]
+  P --> A[14 维关节动作]
+  A --> E[4096 个 GPU 并行机器人]
+  E --> R[前进 · 直立 · 少摔 · 少打滑]
+  R --> U[PPO 更新策略]
+  U --> P
+```
+
+4,096 个环境不是 4,096 个不同模型，而是 4,096 只同步试错的虚拟小鸭，共同更新同一套策略参数。并行环境越多，每轮采样越充分，也越能利用 GPU。此次 4,096 环境 smoke 的平均训练吞吐约为 2.4–3.2 万 step/s；真正可用的上游步态通常需要数千轮，而不是本次 5 轮。
 
 ## 平台分层
 
@@ -56,7 +72,7 @@ wsl -d Ubuntu -- bash -lc 'cd /mnt/d/vibe_code/02_sys3d/mini-duck-lite && bash s
 wsl -d Ubuntu -- bash -lc 'cd /mnt/d/vibe_code/02_sys3d/mini-duck-lite && uv run mini-duck-g0'
 ```
 
-输出是环境审计 JSON，只表示本机前置条件，不表示 G0 已通过。
+输出是环境审计 JSON，只表示本机前置条件；G0 的真实训练与播放结果以实验记录为准。
 
 ## 上游 G0 验证
 
@@ -72,7 +88,7 @@ bash scripts/run_g0_upstream_smoke.sh /path/to/microduck_rl
 bash scripts/run_g0_upstream_smoke.sh /path/to/microduck_rl --train-smoke
 ```
 
-官方 viewer/policy 仍需要有效 checkpoint；实际命令与结果必须记录到 `docs/experiments/`，不能用自制 tether 模型替代。
+本机已完成一次上述 smoke，并用生成的 checkpoint 启动官方 viewer。重新执行时，实际命令与结果仍必须记录到 `docs/experiments/`，不能用自制 tether 模型替代。
 
 ## 文档入口
 
@@ -93,20 +109,22 @@ bash scripts/run_g0_upstream_smoke.sh /path/to/microduck_rl --train-smoke
 - [x] 完成目标电脑的 WSL2、Python、uv、Git、GPU 环境审计；
 - [x] 提供 G0 命令行审计工具、自动化测试和可复现构建；
 - [x] 提供上游 registry、CPU tests 与最小训练 smoke 的统一脚本入口；
-- [x] 建立实验记录目录，区分“已实测结果”和“计划执行项”。
+- [x] 建立实验记录目录，区分“已实测结果”和“计划执行项”；
+- [x] 完成官方 checkpoint 播放和 64 环境训练 smoke；
+- [x] 完成 4,096 个同步环境的 GPU 并行训练验证。
 
-### TODO：当前 Gate G0
+### G0 验收：已完成
 
-- [ ] 在仓库外检出 Microduck RL 固定 commit，并完成 `uv sync`；
-- [ ] 运行 `uv run list-envs`，确认官方任务已正确注册；
-- [ ] 运行上游 CPU tests，并保存完整结果；
-- [ ] 启动官方 viewer，核对初始姿态、关节角、足底接触和模型朝向；
-- [ ] 使用有效 checkpoint 启动官方 policy 推理，确认机器人能够在仿真中执行动作；
-- [ ] 运行 64 env / 5 iteration 强化学习 smoke；
-- [ ] 记录命令、耗时、显存、训练指标、checkpoint 和失败信息；
-- [ ] 所有验收项通过后，将 G0 标记为完成并进入 G1。
+- [x] 在仓库外检出 Microduck RL 固定 commit，并完成 `uv sync`；
+- [x] 运行 `uv run list-envs`，确认官方任务已正确注册；
+- [x] 运行上游 CPU tests，结果为 154 passed、1 skipped；
+- [x] 启动官方 viewer，执行 HOME_FRAME reset 与 CUDA 仿真；
+- [x] 使用 smoke checkpoint 启动官方 policy 推理；
+- [x] 完成 64 env / 5 iteration 最小训练；
+- [x] 完成 4,096 env / 5 iteration GPU 并行负载验证；
+- [x] 记录命令、耗时、显存、训练指标、checkpoint 和失败信息。
 
-### TODO：下一 Gate G1
+### TODO：当前 Gate G1
 
 - [ ] 基于真实结构参数建立自有 10DOF MJCF 与执行器配置；
 - [ ] 定义可复现的中立站立姿态、reset 流程、关节限位和自碰撞规则；
@@ -121,7 +139,8 @@ bash scripts/run_g0_upstream_smoke.sh /path/to/microduck_rl --train-smoke
 
 - 不把持续遥控作为 Hero Demo 输入；
 - 不让 LLM/VLA 直接输出舵机角度；
-- 不在 G0 购买整套舵机或开始长训练；
+- 不把 5 iteration smoke 描述成“已经学会稳定走路”；
+- 不在 G1 完成前购买整套舵机；
 - 不把 3DGS 写死为导航地图；
 - 不以卡通几何代理冒充 Microduck/Open Duck 工业结构；
 - 不将未实测物理参数包装成 Sim2Real 结果。

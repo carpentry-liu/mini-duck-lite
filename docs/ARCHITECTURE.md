@@ -113,4 +113,4 @@ flowchart TB
 | `gateway` | MCP、auth、lease、approval、audit | G6.5/G11.5 |
 | `adapters` | VLA、WAM、MHS 等实验提供者 | G11.5-G13 |
 
-当前仓库只落地 G0 环境与上游复现工具，不能用空目录假装未来模块已经实现。
+当前仓库已落地并通过 G0 环境与上游复现工具；G1 自有 `embodiment` 与 `training` 尚未实现，不能用空目录或上游 14DOF smoke 假装自有 10DOF 策略已经完成。

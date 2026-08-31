@@ -11,7 +11,12 @@ import subprocess
 import sys
 from typing import Callable, Sequence
 
-from mini_duck_lite.upstream import CURRENT_GATE, UPSTREAM_REFS
+from mini_duck_lite.upstream import (
+    CURRENT_GATE,
+    G0_EVIDENCE,
+    LAST_PASSED_GATE,
+    UPSTREAM_REFS,
+)
 
 
 @dataclass(frozen=True)
@@ -66,8 +71,10 @@ def build_report(runner: Runner = _probe, *, require_gpu: bool = True) -> dict[s
         "project": "Mini Duck Physical AI Platform",
         "project_version": "0.3",
         "current_gate": CURRENT_GATE,
+        "last_passed_gate": LAST_PASSED_GATE,
         "gate_passed": False,
-        "scope": "local prerequisites only; upstream registry/viewer/policy/smoke remain",
+        "g0_evidence": G0_EVIDENCE,
+        "scope": "local prerequisites only; this command does not execute the current G1",
         "platform": platform.platform(),
         "python": platform.python_version(),
         "python_executable": sys.executable,

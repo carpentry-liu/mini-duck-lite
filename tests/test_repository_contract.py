@@ -35,5 +35,6 @@ def test_upstream_script_matches_the_versioned_smoke_contract() -> None:
 
     assert MICRODUCK_RL_COMMIT in script
     assert MICRODUCK_TASK_ID in script
+    assert 'grep -Fq "$task_id"' in script
     assert f"--env.scene.num-envs {TRAIN_SMOKE_ENV_COUNT}" in script
     assert f"--agent.max_iterations {TRAIN_SMOKE_ITERATIONS}" in script

@@ -71,7 +71,7 @@ Sensor Head 必须可拆卸，并预留 RGB-D、Stereo、ToF、Event、Thermal �
 
 ## 范围控制
 
-Agent-Hardware、Spatial AI、复杂地形、VLA 和 World Model 进入架构与 Roadmap，但不会提前进入实现。当前唯一主任务是 G0：在目标开发机复现固定版本的官方 viewer/policy 与最小 smoke。
+Agent-Hardware、Spatial AI、复杂地形、VLA 和 World Model 进入架构与 Roadmap，但不会提前进入实现。G0 已在目标开发机完成固定版本的官方 viewer/policy、64 环境 smoke 与 4,096 环境 GPU 并行验证；当前唯一主任务是 G1：自有 10DOF 仿真 Walk。
 
 ## 预算原则
 
