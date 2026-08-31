@@ -39,6 +39,8 @@ Gate 是预算和范围的硬边界。未满足上一 Gate 的可复现验收，
 
 ## 当前 Gate：G1
 
+官方 14DOF `model_1000.pt` 已完成 103.1M step 训练并通过固定直行评估，可作为训练、日志和 checkpoint 验收流程参考；由于自有 10DOF model/contract 尚不存在，G1 验收项仍全部按自有实现判断。
+
 ### 验收清单
 
 - [ ] 自有 10DOF MJCF 的结构来源、joint order、axis、sign 和 limit 可追溯；
@@ -50,10 +52,8 @@ Gate 是预算和范围的硬边界。未满足上一 Gate 的可复现验收，
 
 ### 当前非目标
 
-- 自有 10DOF MJCF、URDF 或外观模型；
-- 自有 walk/recovery reward 与 PPO 长训练；
-- ONNX 自有 policy 导出；
 - 舵机、控制板、IMU 或 SBC 采购；
+- HIL、真机站立、真机行走与 Sim2Real 宣称；
 - SLAM、3DGS、Spatial Memory、VLA/WAM；
 - 外部 Agent 真机写操作。
 

@@ -11,7 +11,7 @@
 
 ## 当前唯一 Gate
 
-**G0 已于 2026-08-31 通过。当前是 G1：自有 10DOF 仿真 Walk。** G0 证据见 `docs/experiments/2026-08-31-g0-upstream-gpu-training.md`；不得把 5-iteration smoke 描述为可用步态。
+**G0 已于 2026-08-31 通过。当前是 G1：自有 10DOF 仿真 Walk。** G0 证据见 `docs/experiments/2026-08-31-g0-upstream-gpu-training.md`；官方 14DOF 正式步态证据见 `docs/experiments/2026-08-31-upstream-walk-training.md`。不得把 5-iteration smoke 描述为可用步态，也不得把官方 14DOF checkpoint 冒充自有 10DOF G1 结果。
 
 G1 允许实施自有 MJCF、Policy Contract、reward/DR、PPO 训练、checkpoint 评估与 ONNX CPU replay。以下内容当前只允许设计接口，不允许实施：舵机采购、HIL、真机控制、SLAM/3DGS、VLA/World Model、外部 Agent 真机写操作。
 
@@ -50,5 +50,7 @@ uv run mini-duck-g0
 ```
 
 上游 G0 验证使用 `scripts/run_g0_upstream_smoke.sh <microduck_rl_checkout>`；训练 smoke 默认不执行，必须显式传入 `--train-smoke`。
+
+官方长训练使用 `scripts/run_upstream_walk_training.sh` 采集 manifest、完整终端、GPU CSV、TensorBoard 和 W&B offline；checkpoint 使用 `scripts/evaluate_upstream_walk.py` 的固定命令指标选择。原始 checkpoint、ONNX、视频和第三方模型资产保持在忽略的 `artifacts/` 或外置上游目录，仓库只提交可复现实验摘要。
 
 完成任务时同步更新 `docs/PROGRESS.md`；重大取舍写入 `docs/DECISIONS.md`；实验记录放在 `docs/experiments/`。Commit 使用清晰的 Conventional Commit 类型和中文全角冒号，例如 `docs：对齐 Physical AI Platform V0.3`。

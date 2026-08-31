@@ -45,3 +45,9 @@ Agent Gateway 优先提供 MCP；其他 Agent-Hardware 协议只通过 adapter �
 - `google-deepmind/mujoco` main：`b62c3e886adfcfe220a694408ca8a41cee50b976`
 
 上游源码不进入本仓库。复制代码或模型资产前必须记录来源、commit、许可证和修改范围。
+
+## D-008：用固定命令评估选择 checkpoint
+
+日期：2026-08-31
+
+长训练不以“跑满 iteration”或单轮 reward 作为完成条件。先用 128 个 domain-randomized 环境固定直行 10 秒，检查不摔比例、前向速度 RMSE、净横移、净偏航和 NaN；连续 seed 通过后可提前停止。官方 14DOF `model_1000.pt` 已按该规则选中，但只作为 G1 的训练/评估参考，不能替代自有 10DOF 策略。

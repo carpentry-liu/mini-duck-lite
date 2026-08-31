@@ -27,9 +27,11 @@ G0 已完成：
 | 官方 checkpoint 加载与策略推理 | ✅ 已完成 | `model_4.pt` 已通过官方 `play` 加载并在 native viewer 运行 |
 | 64 env / 5 iteration 最小训练 | ✅ 已完成 | 7,680 step；生成 `model_0.pt`、`model_4.pt` 与 ONNX |
 | 4,096 env / 5 iteration 并行训练 | ✅ 已完成 | 491,520 step；GPU 峰值 70%，峰值显存约 6,378 MiB |
+| 官方 4,096 env 正式行走训练 | ✅ 已完成 | 训练至第 1,048 轮 / 103.1M step；选择通过验收的 `model_1000.pt` |
+| 固定直行量化评估与高清回放 | ✅ 已完成 | 两组 seed 均 128/128 不摔；0 NaN；5 秒 720p 固定命令视频 |
 | 自有 10DOF 强化学习训练 | ⏳ 尚未开始 | 当前 G1 主任务；上游 14DOF smoke 不能冒充自有策略 |
 
-完整证据见 [`docs/experiments/2026-08-31-g0-upstream-gpu-training.md`](docs/experiments/2026-08-31-g0-upstream-gpu-training.md)。5 iteration 只证明环境、GPU、PPO、checkpoint 和播放链路可用，不代表已经得到稳定步态。
+G0 链路证据见 [`2026-08-31-g0-upstream-gpu-training.md`](docs/experiments/2026-08-31-g0-upstream-gpu-training.md)，正式步态证据见 [`2026-08-31-upstream-walk-training.md`](docs/experiments/2026-08-31-upstream-walk-training.md)。5 iteration smoke 只证明链路；正式结论来自 98.4M step checkpoint、固定命令量化评估和真实回放。上述模型仍是官方 14DOF，不代表自有 10DOF G1 已完成。
 
 ## 强化学习到底在训练什么
 
@@ -47,7 +49,7 @@ flowchart LR
   U --> P
 ```
 
-4,096 个环境不是 4,096 个不同模型，而是 4,096 只同步试错的虚拟小鸭，共同更新同一套策略参数。并行环境越多，每轮采样越充分，也越能利用 GPU。此次 4,096 环境 smoke 的平均训练吞吐约为 2.4–3.2 万 step/s；真正可用的上游步态通常需要数千轮，而不是本次 5 轮。
+4,096 个环境不是 4,096 个不同模型，而是 4,096 只同步试错的虚拟小鸭，共同更新同一套策略参数。正式训练选择第 1,000 轮 checkpoint 时累计 98,402,304 step，单轮吞吐 36,392 step/s；GPU 平均利用率 57.94%、峰值 88%，峰值显存 6,934 MiB。模型通过固定直行验收后提前停止，避免机械跑满上限。
 
 ## 平台分层
 
@@ -90,6 +92,28 @@ bash scripts/run_g0_upstream_smoke.sh /path/to/microduck_rl --train-smoke
 
 本机已完成一次上述 smoke，并用生成的 checkpoint 启动官方 viewer。重新执行时，实际命令与结果仍必须记录到 `docs/experiments/`，不能用自制 tether 模型替代。
 
+## 官方行走正式训练与评估
+
+正式训练会校验外置上游 commit、记录 manifest/终端/GPU CSV，并启用 TensorBoard 与 W&B offline：
+
+```bash
+bash scripts/run_upstream_walk_training.sh \
+  /path/to/microduck_rl \
+  /path/to/artifacts/walk-training \
+  --envs 4096 --iterations 4000 --seed 42
+```
+
+用固定命令对 checkpoint 做可重复验收；该脚本须从 Microduck RL 的 `uv` 环境运行：
+
+```bash
+uv run python /path/to/mini-duck-lite/scripts/evaluate_upstream_walk.py \
+  /path/to/model_1000.pt /path/to/evaluation.json \
+  --num-envs 128 --steps 500 --burn-in-steps 50 \
+  --command-x 0.25 --device cuda:0
+```
+
+增加 `--video-dir /path/to/video` 可在同一固定命令下生成 1280×720 回放。训练上限不是完成标准；checkpoint 只有通过不摔、速度、净横移、净偏航和 NaN 验收后才能被选中。
+
 ## 文档入口
 
 - [产品范围](docs/PRD.md)
@@ -111,7 +135,9 @@ bash scripts/run_g0_upstream_smoke.sh /path/to/microduck_rl --train-smoke
 - [x] 提供上游 registry、CPU tests 与最小训练 smoke 的统一脚本入口；
 - [x] 建立实验记录目录，区分“已实测结果”和“计划执行项”；
 - [x] 完成官方 checkpoint 播放和 64 环境训练 smoke；
-- [x] 完成 4,096 个同步环境的 GPU 并行训练验证。
+- [x] 完成 4,096 个同步环境的 GPU 并行训练验证；
+- [x] 完成官方 14DOF 103.1M step 正式训练并选择 `model_1000.pt`；
+- [x] 完成双 seed 固定直行量化评估和 720p 真实回放。
 
 ### G0 验收：已完成
 
