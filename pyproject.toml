@@ -4,18 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mini-duck-lite"
-version = "0.1.0"
-description = "A staged 10DOF biped simulation and Sim2Real project"
+version = "0.3.0"
+description = "Gate-driven tooling for the Mini Duck Physical AI Platform"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = [
-  "mujoco>=3.3,<4",
-  "numpy>=2.0,<3",
-  "pillow>=11,<13",
-]
+dependencies = []
 
 [project.scripts]
-mini-duck-sim = "mini_duck_lite.simulation:main"
+mini-duck-g0 = "mini_duck_lite.g0:main"
 
 [dependency-groups]
 dev = [

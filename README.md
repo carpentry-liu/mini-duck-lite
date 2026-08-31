@@ -1,83 +1,78 @@
-# Mini Duck Lite
+# Mini Duck Physical AI Platform
 
-Mini Duck Lite 是一个个人可完成、分 Gate 投入的 10DOF 双足小鸭机器人项目。V0.1 的主线是先在 MuJoCo 中建立可验证的身体与控制契约，再逐步走向 PPO、ONNX、2 舵机 HIL 和真机 Sim2Real。
+一个以低成本双足机器人为第一载体的 Physical AI 实验平台：先让身体可靠行动，再理解空间，最后让不同 AI Agent 通过安全、标准化接口使用真实机器人。
 
-当前仓库交付的是第一步软件闭环：
+Duck V0.1 是第一种 embodiment，目标为 10DOF 双腿、自主站立与行走、跌倒恢复、视觉找人和安全靠近。平台本身不写死到“小鸭外壳”或 10 个关节；未来的定位、地图、Spatial Memory、Skill Router 与 Agent Gateway 应能复用于轮式、四足等本体。
 
-- 10DOF 双腿 MJCF 模型；
-- 500 Hz 物理步进与 50 Hz 控制节拍；
-- 关节、执行器、IMU 与足底接触契约；
-- WSL2 中可重复执行的无界面仿真；
-- 关节周期动作、JSONL 遥测、摘要指标和可选 PNG 快照；
-- CPU smoke test 与契约测试。
+## 当前状态
 
-> 当前的“first step”使用调试 tether 固定躯干，只验证模型、关节和控制链路。它不是已训练的行走 policy，也不代表 G1 已完成。
+**当前 Gate：G0 · 上游仿真基线复现。**
 
-## WSL2 快速启动
+本仓库目前只负责：
 
-这台电脑已经安装 Ubuntu 24.04 WSL2、Python 3.12 和 `uv`。在 PowerShell 中执行：
+- 固定 Microduck RL、Open Duck Playground 与 MuJoCo 参考 commit；
+- 检查 WSL2、Python、uv、Git、GPU 等开发环境；
+- 提供官方 task registry、viewer/policy 与小规模训练 smoke 的可复现入口；
+- 保存真实命令、版本、日志和失败证据。
+
+G0 未通过前，不开始自有 10DOF MJCF、长时间 PPO、硬件采购、SLAM/3DGS 或外部 Agent 真机写操作。
+
+## 平台分层
+
+```mermaid
+flowchart TB
+  A[Claude / Codex / ChatGPT / Local Agent] --> G[Agent Gateway\nMCP first · MHS-ready]
+  G --> R[Embodied Agent / Skill Router]
+  R --> S[Skills + Spatial Intelligence]
+  S --> P[Perception / Localization / Mapping]
+  S --> L[Locomotion + Safe Runtime]
+  L --> H[Embodiment / Hardware]
+```
+
+硬实时控制、感知定位、Skill 和 Agent 分属不同频率与故障域。Agent 只能调用白名单 Skill；50 Hz 控制环不依赖 LLM、网络或地图优化。
+
+## 本机快速检查
+
+在 PowerShell 中：
 
 ```powershell
 wsl -d Ubuntu -- bash -lc 'cd /mnt/d/vibe_code/02_sys3d/mini-duck-lite && bash scripts/wsl_bootstrap.sh'
-wsl -d Ubuntu -- bash -lc 'cd /mnt/d/vibe_code/02_sys3d/mini-duck-lite && bash scripts/run_first_simulation.sh'
+wsl -d Ubuntu -- bash -lc 'cd /mnt/d/vibe_code/02_sys3d/mini-duck-lite && uv run mini-duck-g0'
 ```
 
-也可以进入 WSL 后逐步运行：
+输出是环境审计 JSON，只表示本机前置条件，不表示 G0 已通过。
+
+## 上游 G0 验证
+
+先在本仓库之外检出 `docs/UPSTREAM.md` 固定的 Microduck RL commit，然后执行：
 
 ```bash
-cd /mnt/d/vibe_code/02_sys3d/mini-duck-lite
-uv sync --all-groups
-uv run pytest
-MUJOCO_GL=egl uv run mini-duck-sim \
-  --duration 2 \
-  --render \
-  --output artifacts/g0-first-simulation
+bash scripts/run_g0_upstream_smoke.sh /path/to/microduck_rl
 ```
 
-仿真输出：
-
-```text
-artifacts/g0-first-simulation/
-├── summary.json
-├── telemetry.jsonl
-└── final-frame.png
-```
-
-如果 WSL 没有可用 EGL，可去掉 `--render`；动力学仿真与测试仍可运行。
-
-## 验收命令
+该命令验证 commit、依赖、task registry 和上游 CPU tests。只有明确授权 GPU 小规模训练时才执行：
 
 ```bash
-uv run pytest
-uv run mini-duck-sim --duration 0.2 --output artifacts/smoke
+bash scripts/run_g0_upstream_smoke.sh /path/to/microduck_rl --train-smoke
 ```
 
-成功时命令返回码为 0，`summary.json` 中应满足：
+官方 viewer/policy 仍需要有效 checkpoint；实际命令与结果必须记录到 `docs/experiments/`，不能用自制 tether 模型替代。
 
-- `passed: true`；
-- `actuator_count: 10`；
-- `joint_count: 10`；
-- 所有状态和控制量均为有限值；
-- 遥测采样频率为 50 Hz。
+## 文档入口
 
-## 项目结构
+- [产品范围](docs/PRD.md)
+- [系统架构](docs/ARCHITECTURE.md)
+- [核心接口](docs/INTERFACES.md)
+- [Gate 路线](docs/ROADMAP.md)
+- [当前进度](docs/PROGRESS.md)
+- [决策记录](docs/DECISIONS.md)
+- [上游基线](docs/UPSTREAM.md)
 
-```text
-mini-duck-lite/
-├── src/mini_duck_lite/       # 合同、仿真入口和 MJCF
-├── tests/                    # 无 GPU 契约与 smoke test
-├── scripts/                  # WSL 初始化与第一步仿真
-├── docs/                     # PRD、架构、路线、决策、进度和实验记录
-├── pyproject.toml
-└── uv.lock
-```
+## 当前明确不做
 
-## 当前边界
-
-- 尚未训练 PPO walk/recovery policy；
-- 尚未导出 ONNX；
-- 尚未做执行器辨识、舵机 HIL 或真机控制；
-- 质量、惯量、摩擦和执行器参数目前仅用于软件 smoke，不得直接当作真机参数；
-- 任何硬件采购应等待对应 Gate 的软件验收完成。
-
-详细范围见 [docs/PRD.md](docs/PRD.md)，当前事实见 [docs/PROGRESS.md](docs/PROGRESS.md)。
+- 不把持续遥控作为 Hero Demo 输入；
+- 不让 LLM/VLA 直接输出舵机角度；
+- 不在 G0 购买整套舵机或开始长训练；
+- 不把 3DGS 写死为导航地图；
+- 不以卡通几何代理冒充 Microduck/Open Duck 工业结构；
+- 不将未实测物理参数包装成 Sim2Real 结果。

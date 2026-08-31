@@ -1,33 +1,56 @@
-# 路线与 Gate
+# Roadmap 与 Gate
 
-## G0：参考环境与本机软件栈
+Gate 是预算和范围的硬边界。未满足上一 Gate 的可复现验收，不进入下一 Gate。
 
-验收：
+| Phase / Gate | 目标 | 预算或增量 | 通过条件 |
+|---|---|---:|---|
+| A · G0 | 上游仿真基线 | ¥0 | 固定 commit 的官方 task registry、viewer/policy 与最小 smoke 可复现 |
+| A · G1 | 自有 10DOF 仿真 Walk | ¥0 | 自有 model 连续走；Policy Contract 锁定；ONNX CPU replay |
+| A · G2 | 2 Servo HIL | ¥300-500 | 50 Hz 连续 30 min 稳定；获得 actuator 实测数据 |
+| A · G3 | 10DOF 真机 Stand | 累计 ¥1,700-2,300 | 10 次上电至少 8 次安全站立 |
+| A · G4 | Sim2Real Walk | 累计 ¥1,900-2,600 | 10 次 2 m 至少 7 次不摔 |
+| A · G5 | Recovery | 累计 ¥2,000-2,700 | 标准跌倒至少 70% 恢复，且无需重启 |
+| A · G6 | 自主找人 | 累计 ¥2,100-3,000 | 完整 Body Intelligence Hero Demo |
+| A · G6.5 | Agent Gateway Foundation | ¥0 | MCP client 在 SIM/replay 可受控调用并产生审计回执 |
+| B · G7 | Rough Terrain | 先仿真 ¥0 | 按 T1/T2 profile 报告可复现成功率 |
+| C · G8 | Localization / Data | ¥0-500 起 | RGB/IMU/Pose 可重放、标定和时间可追溯 |
+| C · G9 | Mapping / 3DGS | 独立核价 | 路线生成可重建 3D artifact，backend 可替换 |
+| C · G10 | Spatial Memory | 软件为主 | 语义实体可查询并返回证据 |
+| D · G11 | Skill Agent | 软件为主 | 长时任务失败可返回 failure code 并 replan |
+| D · G11.5 | External Agent Physical Interop | 软件为主 | 至少两类 Agent 通过同一 contract 受控调用真机 Skill |
+| D · G12/G13 | VLA / WAM Research | 按模型与算力核价 | 对照实验相对 baseline 有量化增益 |
+| E · G14 | Cross-Embodiment | 另行设计 | 第二本体复用高层 stack |
 
-- [x] WSL2 Ubuntu、Python、uv 和 GPU 可识别；
-- [x] 上游仓库与 commit 已记录；
-- [x] MuJoCo 无界面模型加载和短仿真可运行；
-- [x] CPU 契约测试可运行；
-- [ ] 上游 Microduck 官方 task registry / viewer 完整复现。
+## 当前 Gate：G0
 
-## G1：自己的 10DOF 仿真鸭
+### 验收清单
 
-验收：
+- [x] WSL2 Ubuntu、Python、uv、Git 与 NVIDIA GPU 可识别；
+- [x] Microduck RL、Open Duck Playground、MuJoCo 固定 commit 已记录；
+- [ ] 固定 commit 的 Microduck RL 依赖安装可复现；
+- [ ] `uv run list-envs` 输出官方 task registry；
+- [ ] 官方 CPU tests 通过；
+- [ ] 官方 viewer/policy 使用有效 checkpoint 成功运行；
+- [ ] 64 env / 5 iteration 或上游等价最小训练 smoke 完成；
+- [ ] 命令、版本、日志、耗时、显存和失败记录入 `docs/experiments/`。
 
-- [x] MJCF 和 `JointContractV1`；
-- [x] 关节/执行器/传感器 invariant 测试；
-- [x] tethered articulation smoke；
-- [ ] 自由站立模型与接触检查；
-- [ ] walk PPO smoke；
-- [ ] walk ONNX 与 CPU inference rehearsal。
+### 当前非目标
 
-## G2：2 舵机 HIL
+- 自有 10DOF MJCF、URDF 或外观模型；
+- 自有 walk/recovery reward 与 PPO 长训练；
+- ONNX 自有 policy 导出；
+- 舵机、控制板、IMU 或 SBC 采购；
+- SLAM、3DGS、Spatial Memory、VLA/WAM；
+- 外部 Agent 真机写操作。
 
-验证 STS3215 总线、反馈、IMU、50 Hz loop、电源和安全边界；通过前不采购整套舵机。
+## 复杂地形分级
 
-## G3～G6
+| 等级 | 定义 | 主要技术 |
+|---|---|---|
+| T0 | 平整硬地面 | Flat locomotion |
+| T1 | 地毯、摩擦变化、轻坡 | DR + robust proprioceptive policy |
+| T2 | 小高度扰动、低矮障碍、不规则地面 | heightfield curriculum + contact robustness |
+| T3 | 明显斜坡、草地、碎石、低台阶 | terrain perception + traversability |
+| T4 | 复杂落脚点或连续障碍 | footstep planning / policy / WBC integration |
 
-- G3：10DOF 结构站立；
-- G4：Sim2Real 平地行走；
-- G5：至少一种姿态的摔倒恢复；
-- G6：无持续遥控的找人和靠近 Hero Demo。
+进入 G6.5、G7、G9、G11、G11.5、G12 或 G13 前，必须重新核验相关论文、GitHub 项目和 Agent-Hardware protocol；路线图保留接口位置，不锁定快速变化的实现。

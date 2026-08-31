@@ -11,5 +11,6 @@ fi
 
 uv sync --all-groups
 uv run pytest
+uv run mini-duck-g0
 
-printf '\nMini Duck Lite WSL environment is ready.\n'
+printf '\nLocal prerequisites are ready for the upstream G0 reproduction.\n'
