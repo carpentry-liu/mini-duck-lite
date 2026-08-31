@@ -4,6 +4,7 @@
 
 | 项目 | 分支 | 固定 commit | V0.4 用途 |
 |---|---|---|---|
+| [Microduck](https://github.com/pollen-robotics/microduck) | main | 在线跟踪，不复制硬件定义 | 官方端侧 runtime、50 Hz 控制环、设备服务、安全与升级架构参考 |
 | [Microduck RL](https://github.com/pollen-robotics/microduck_rl) | develop | `d424a0c899f6b33cbd3daeb279913134349c0b63` | 官方 task registry、mjlab/MuJoCo Warp、PPO smoke、viewer/policy、ONNX |
 | [Open Duck Playground](https://github.com/apirrone/Open_Duck_Playground) | main | `b9be205ac64488c23504ca42e5ec790337adeec3` | Open Duck Mini v2 MJCF、viewer/inference 与接入目录范式 |
 | [MuJoCo](https://github.com/google-deepmind/mujoco) | main | `b62c3e886adfcfe220a694408ca8a41cee50b976` | 原生物理仿真和 Python API |
@@ -19,6 +20,8 @@ Open Duck Playground 的 Open Duck Mini v2 同样以 Onshape 导出的 MJCF/XML 
 ## 许可证边界
 
 Microduck RL 代码使用 Apache-2.0；其 README 另行声明 3D model files 为 Creative Commons BY-SA-NC。H0 仅外置检出和运行，不复制模型资产。后续如决定复用网格，必须先完成署名、ShareAlike、NonCommercial 影响评审。
+
+`pollen-robotics/microduck` 是官方软件运行栈参考，不等于公开的 Microduck 硬件 BOM。本项目不声称是官方分支，也不根据公开软件反推或复制其未公开机械、电控设计；自有 10DOF 硬件采用独立设计和 H1/H2 实测参数。
 
 ## H0/H1 执行约束
 

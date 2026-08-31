@@ -1,8 +1,22 @@
 # Mini Duck Physical AI Platform
 
-一个从真实双足机器人出发的 Physical AI 工程：先把执行器、机械、供电和步态做可靠，再逐步加入视觉、空间理解与受控 Agent。
+**基于 [Pollen Robotics Microduck](https://github.com/pollen-robotics/microduck) 与 [Microduck RL](https://github.com/pollen-robotics/microduck_rl) 路线开展的拓展性复现。** 从真实双足机器人出发，先把执行器、机械、供电和步态做可靠，再逐步加入视觉、空间理解与受控 Agent。
 
 当前版本：**V0.4 Hardware-First** ｜ 当前 Gate：**H1 Hardware Qualification** ｜ H0 上游仿真基线：**已通过**
+
+## 基于 Microduck，但不止于复刻
+
+Microduck 证明了小型双足机器人可以在 MuJoCo 中训练策略、导出 ONNX，并以 50 Hz 在端侧闭环运行。本项目先复现这条公开的软件与强化学习链路，再面向个人开发者补齐一条更容易验证、修改和继续扩展的工程路径。
+
+| 层次 | 本项目工作 |
+|---|---|
+| 可复现基线 | 固定 Microduck RL 上游 commit，在 WSL2 + NVIDIA GPU 中完成环境安装、PPO 训练、checkpoint、量化评估和视频证据 |
+| 自有硬件 | 建立独立的 10DOF Duck，不照抄未公开的官方 Microduck 机械与电控；执行器、IMU、质量和关节参数由实测确定 |
+| Hardware-First | 先比较 `STS3215-C044` / `C046`，再做单腿和全身，不用仿真结果代替真实硬件验收 |
+| Sim2Real 工程 | 用 `HardwareManifest`、`ActuatorProfile`、Policy Contract 和 `SIM/HIL/REAL` 证据等级连接训练与真机 |
+| 拓展方向 | 在可靠行走与恢复之上继续加入视觉、Spatial AI、白名单 Skill、Agent 和新的轮式/四足 embodiment |
+
+这不是 Pollen Robotics 的官方分支或硬件复刻套件。上游代码、训练模型和资产遵守各自许可证并保持明确归属；本仓库新增的是 10DOF 目标硬件、资格测试、安全运行时和可审计的开发流程。
 
 ## 这个项目想做什么
 
@@ -201,6 +215,7 @@ H0 仿真基线（已通过）
 
 ## 上游参考
 
+- [Microduck](https://github.com/pollen-robotics/microduck)：官方端侧运行架构、50 Hz 控制闭环、设备服务与安全设计参考；
 - [Microduck RL](https://github.com/pollen-robotics/microduck_rl)：mjlab/MuJoCo 强化学习基线；
 - [Open Duck Mini v2](https://github.com/apirrone/Open_Duck_Mini/tree/v2)：约 42 cm 机械、BOM 与 Sim2Real 参考；
 - [Open Duck Mini Runtime](https://github.com/apirrone/Open_Duck_Mini_Runtime)：Pi Zero 2 W、IMU、motor controller、offset 和 ONNX runtime 范式。
