@@ -42,11 +42,13 @@ MUJOCO_GL=egl uv run mini-duck-sim \
 | telemetry samples | 100 | 100 |
 | joints / actuators / sensors | 10 / 10 / 5 | 10 / 10 / 5 |
 | finite state | true | true |
-| final base z | 0.340665 m | 0.080281 m |
-| max absolute joint velocity | 1.844046 rad/s | 6.588429 rad/s |
+| final base z | 0.340597 m | 0.085670 m |
+| max absolute joint velocity | 5.322982 rad/s | 7.098056 rad/s |
 | result | pass | 数值通过，姿态跌倒 |
 
 测试集结果：`4 passed`。
+
+本轮同时重做了视觉代理：用独立头部、眼睛高光、腹部、短翅、尾部和圆润鸭掌替代原来的基础几何块，并将离屏快照提高到 960×720。关节、执行器和传感器命名及数量保持不变。
 
 ![Tethered 10DOF articulation smoke](2026-08-31-g0-first-simulation.png)
 

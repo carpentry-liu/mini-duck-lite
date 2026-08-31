@@ -3,8 +3,10 @@
   <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast" cone="elliptic"/>
 
   <visual>
-    <global azimuth="130" elevation="-18"/>
-    <rgba haze="0.15 0.15 0.15 1"/>
+    <global azimuth="130" elevation="-16" offwidth="960" offheight="720"/>
+    <quality shadowsize="4096"/>
+    <headlight ambient="0.45 0.45 0.45" diffuse="0.65 0.65 0.65" specular="0.15 0.15 0.15"/>
+    <rgba haze="0.85 0.90 0.96 1"/>
   </visual>
 
   <default>
@@ -14,39 +16,57 @@
   </default>
 
   <asset>
+    <texture name="sky_tex" type="skybox" builtin="gradient" width="512" height="3072" rgb1="0.72 0.86 0.98" rgb2="0.97 0.98 1.00"/>
     <texture name="floor_tex" type="2d" builtin="checker" width="256" height="256" rgb1="0.82 0.82 0.82" rgb2="0.94 0.94 0.94"/>
-    <material name="floor_mat" texture="floor_tex" texrepeat="4 4" reflectance="0.05"/>
-    <material name="duck_yellow" rgba="0.96 0.67 0.10 1"/>
+    <material name="floor_mat" texture="floor_tex" texrepeat="6 6" reflectance="0.01"/>
+    <material name="duck_yellow" rgba="1.00 0.70 0.06 1"/>
+    <material name="duck_light" rgba="1.00 0.84 0.28 1"/>
+    <material name="belly_cream" rgba="1.00 0.93 0.68 1"/>
     <material name="joint_dark" rgba="0.20 0.22 0.25 1"/>
-    <material name="foot_orange" rgba="0.96 0.38 0.08 1"/>
+    <material name="foot_orange" rgba="1.00 0.36 0.04 1"/>
+    <material name="eye_black" rgba="0.025 0.025 0.035 1"/>
+    <material name="eye_highlight" rgba="1 1 1 1"/>
   </asset>
 
   <worldbody>
-    <light name="key" pos="1 -1 2" dir="-1 1 -2" directional="true" diffuse="0.8 0.8 0.8"/>
+    <light name="key" pos="1 -1 2" dir="-1 1 -2" directional="true" diffuse="0.85 0.82 0.76" castshadow="true"/>
     <geom name="floor" type="plane" size="3 3 0.05" material="floor_mat"/>
-    <camera name="overview" mode="fixed" pos="0.95 -1.05 0.62" xyaxes="0.74 0.67 0 -0.24 0.26 0.94"/>
+    <camera name="overview" mode="fixed" pos="0.72 -0.81 0.50" xyaxes="0.74 0.67 0 -0.23 0.25 0.94"/>
 
     <body name="base" pos="0 0 0.34">
       <freejoint name="root"/>
-      <geom name="torso" type="ellipsoid" size="0.105 0.075 0.09" mass="0.34" material="duck_yellow"/>
-      <geom name="beak" type="ellipsoid" pos="0.105 0 0.015" size="0.055 0.045 0.025" mass="0.025" material="foot_orange"/>
+      <geom name="body_shell" type="ellipsoid" pos="-0.015 0 0" size="0.12 0.086 0.105" mass="0.28" material="duck_yellow"/>
+      <geom name="belly" type="ellipsoid" pos="0.045 0 -0.018" size="0.078 0.087 0.072" mass="0.025" material="belly_cream" contype="0" conaffinity="0"/>
+      <geom name="head" type="ellipsoid" pos="0.052 0 0.105" size="0.086 0.078 0.082" mass="0.075" material="duck_light"/>
+      <geom name="beak" type="ellipsoid" pos="0.137 0 0.092" size="0.050 0.044 0.021" mass="0.018" material="foot_orange"/>
+      <geom name="left_eye" type="sphere" pos="0.102 0.064 0.133" size="0.012" mass="0.001" material="eye_black" contype="0" conaffinity="0"/>
+      <geom name="right_eye" type="sphere" pos="0.102 -0.064 0.133" size="0.012" mass="0.001" material="eye_black" contype="0" conaffinity="0"/>
+      <geom name="left_eye_highlight" type="sphere" pos="0.108 0.072 0.139" size="0.0035" mass="0.0001" material="eye_highlight" contype="0" conaffinity="0"/>
+      <geom name="right_eye_highlight" type="sphere" pos="0.108 -0.072 0.139" size="0.0035" mass="0.0001" material="eye_highlight" contype="0" conaffinity="0"/>
+      <geom name="left_wing" type="ellipsoid" pos="-0.020 0.086 0.018" euler="0.15 -0.20 -0.12" size="0.068 0.017 0.048" mass="0.014" material="duck_light" contype="0" conaffinity="0"/>
+      <geom name="right_wing" type="ellipsoid" pos="-0.020 -0.086 0.018" euler="-0.15 -0.20 0.12" size="0.068 0.017 0.048" mass="0.014" material="duck_light" contype="0" conaffinity="0"/>
+      <geom name="tail" type="ellipsoid" pos="-0.128 0 0.032" euler="0 -0.45 0" size="0.044 0.050 0.033" mass="0.014" material="duck_light" contype="0" conaffinity="0"/>
       <site name="imu" pos="0 0 0.025" size="0.008" rgba="0.1 0.6 1 1"/>
 
       <body name="left_hip_yaw_link" pos="0 0.055 -0.05">
         <joint name="left_hip_yaw" axis="0 0 1" range="-0.60 0.60"/>
-        <geom type="sphere" size="0.028" mass="0.018" material="joint_dark"/>
+        <geom type="sphere" size="0.028" mass="0.018" material="duck_yellow"/>
         <body name="left_hip_roll_link">
           <joint name="left_hip_roll" axis="1 0 0" range="-0.45 0.45"/>
-          <geom type="sphere" size="0.026" mass="0.016" material="joint_dark"/>
+          <geom type="sphere" size="0.026" mass="0.016" material="duck_yellow"/>
           <body name="left_upper_leg">
             <joint name="left_hip_pitch" axis="0 1 0" range="-1.00 0.80"/>
+            <geom type="ellipsoid" pos="0 0 -0.032" size="0.040 0.036 0.058" mass="0.001" material="duck_light" contype="0" conaffinity="0"/>
             <geom type="capsule" fromto="0 0 0 0 0 -0.12" size="0.024" mass="0.085" material="duck_yellow"/>
             <body name="left_lower_leg" pos="0 0 -0.12">
               <joint name="left_knee_pitch" axis="0 1 0" range="-0.10 1.45"/>
-              <geom type="capsule" fromto="0 0 0 0 0 -0.12" size="0.022" mass="0.075" material="duck_yellow"/>
+              <geom type="capsule" fromto="0 0 0 0 0 -0.12" size="0.022" mass="0.075" material="foot_orange"/>
               <body name="left_foot" pos="0 0 -0.12">
                 <joint name="left_ankle_pitch" axis="0 1 0" range="-0.70 0.70"/>
-                <geom name="left_foot_geom" type="box" pos="0.035 0 -0.025" size="0.065 0.038 0.025" mass="0.055" material="foot_orange"/>
+                <geom name="left_foot_geom" type="box" pos="0.035 0 -0.025" size="0.065 0.038 0.025" mass="0.045" rgba="0 0 0 0"/>
+                <geom name="left_foot_palm" type="ellipsoid" pos="0.030 0 -0.028" size="0.060 0.037 0.022" mass="0.008" material="foot_orange" contype="0" conaffinity="0"/>
+                <geom name="left_toe_outer" type="capsule" fromto="0.040 0.018 -0.031 0.095 0.023 -0.031" size="0.011" mass="0.001" material="foot_orange" contype="0" conaffinity="0"/>
+                <geom name="left_toe_inner" type="capsule" fromto="0.040 -0.012 -0.031 0.092 -0.016 -0.031" size="0.011" mass="0.001" material="foot_orange" contype="0" conaffinity="0"/>
                 <site name="left_foot_site" type="box" pos="0.035 0 -0.050" size="0.060 0.034 0.002" rgba="0 0 0 0"/>
               </body>
             </body>
@@ -56,19 +76,23 @@
 
       <body name="right_hip_yaw_link" pos="0 -0.055 -0.05">
         <joint name="right_hip_yaw" axis="0 0 1" range="-0.60 0.60"/>
-        <geom type="sphere" size="0.028" mass="0.018" material="joint_dark"/>
+        <geom type="sphere" size="0.028" mass="0.018" material="duck_yellow"/>
         <body name="right_hip_roll_link">
           <joint name="right_hip_roll" axis="1 0 0" range="-0.45 0.45"/>
-          <geom type="sphere" size="0.026" mass="0.016" material="joint_dark"/>
+          <geom type="sphere" size="0.026" mass="0.016" material="duck_yellow"/>
           <body name="right_upper_leg">
             <joint name="right_hip_pitch" axis="0 1 0" range="-1.00 0.80"/>
+            <geom type="ellipsoid" pos="0 0 -0.032" size="0.040 0.036 0.058" mass="0.001" material="duck_light" contype="0" conaffinity="0"/>
             <geom type="capsule" fromto="0 0 0 0 0 -0.12" size="0.024" mass="0.085" material="duck_yellow"/>
             <body name="right_lower_leg" pos="0 0 -0.12">
               <joint name="right_knee_pitch" axis="0 1 0" range="-0.10 1.45"/>
-              <geom type="capsule" fromto="0 0 0 0 0 -0.12" size="0.022" mass="0.075" material="duck_yellow"/>
+              <geom type="capsule" fromto="0 0 0 0 0 -0.12" size="0.022" mass="0.075" material="foot_orange"/>
               <body name="right_foot" pos="0 0 -0.12">
                 <joint name="right_ankle_pitch" axis="0 1 0" range="-0.70 0.70"/>
-                <geom name="right_foot_geom" type="box" pos="0.035 0 -0.025" size="0.065 0.038 0.025" mass="0.055" material="foot_orange"/>
+                <geom name="right_foot_geom" type="box" pos="0.035 0 -0.025" size="0.065 0.038 0.025" mass="0.045" rgba="0 0 0 0"/>
+                <geom name="right_foot_palm" type="ellipsoid" pos="0.030 0 -0.028" size="0.060 0.037 0.022" mass="0.008" material="foot_orange" contype="0" conaffinity="0"/>
+                <geom name="right_toe_outer" type="capsule" fromto="0.040 0.018 -0.031 0.095 0.023 -0.031" size="0.011" mass="0.001" material="foot_orange" contype="0" conaffinity="0"/>
+                <geom name="right_toe_inner" type="capsule" fromto="0.040 -0.012 -0.031 0.092 -0.016 -0.031" size="0.011" mass="0.001" material="foot_orange" contype="0" conaffinity="0"/>
                 <site name="right_foot_site" type="box" pos="0.035 0 -0.050" size="0.060 0.034 0.002" rgba="0 0 0 0"/>
               </body>
             </body>

@@ -61,7 +61,7 @@ def _apply_targets(
 
 
 def _render_frame(model: mujoco.MjModel, data: mujoco.MjData, path: Path) -> None:
-    renderer = mujoco.Renderer(model, height=480, width=640)
+    renderer = mujoco.Renderer(model, height=720, width=960)
     try:
         renderer.update_scene(data, camera="overview")
         Image.fromarray(renderer.render()).save(path)
