@@ -1,0 +1,31 @@
+diff --git a/src/mjlab_microduck/tasks/mdp.py b/src/mjlab_microduck/tasks/mdp.py
+index d0e6b66..40b5a75 100644
+--- a/src/mjlab_microduck/tasks/mdp.py
++++ b/src/mjlab_microduck/tasks/mdp.py
+@@ -1270,6 +1270,26 @@ def forward_speed_reward(
+     return torch.tanh(torch.clamp(vx, min=0.0) / vel_ref)
+ 
+ 
++def forward_speed_tracking_reward(
++    env: ManagerBasedRlEnv,
++    target_speed: float = 0.30,
++    std: float = 0.12,
++    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
++) -> torch.Tensor:
++    """Track a non-zero glide speed throughout a phase-conditioned trick.
++
++    ``forward_speed_reward`` saturates once the robot is moving and is useful
++    for learning the direction, but its small weight allowed the historical
++    crouch policy to coast to a complete stop under the obstacle.  This dense
++    Gaussian keeps a meaningful gradient around the desired moving speed so
++    descent, low hold and recovery all happen while rolling.
++    """
++
++    asset: Entity = env.scene[asset_cfg.name]
++    vx = torch.nan_to_num(asset.data.root_link_lin_vel_b[:, 0], nan=0.0)
++    return torch.exp(-((vx - target_speed) / std) ** 2)
++
++
+ def crouch_pose_blend(
+     phase: torch.Tensor,
+     descent_end: float,

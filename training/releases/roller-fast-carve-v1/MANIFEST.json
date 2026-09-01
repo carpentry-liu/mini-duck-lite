@@ -1,0 +1,36 @@
+{
+  "release": "roller-fast-carve-v1.0.0",
+  "created_at": "2026-09-01T16:24:22+08:00",
+  "evidence_level": "SIM",
+  "upstream_repository": "https://github.com/pollen-robotics/microduck_rl",
+  "upstream_base_commit": "d424a0c899f6b33cbd3daeb279913134349c0b63",
+  "experiment_commit": "98701254cd78e3d197dd8e2a0366b61cdf121073",
+  "training": {
+    "os": "WSL2 Ubuntu 24.04.3 LTS",
+    "gpu": "NVIDIA GeForce RTX 5060 Ti 16 GB",
+    "cuda_toolkit": "12.9",
+    "seed": 42,
+    "parallel_envs": 4096,
+    "control_frequency_hz": 50,
+    "physics_step_seconds": 0.005,
+    "policy_step_seconds": 0.02
+  },
+  "payload": [
+    {"path":"evidence/roller_fast_carve_gate_final_50fps.mp4","bytes":17353457,"sha256":"d099bc54c35389bf1bae8c056f2470f8d049c63f9d65712e13f3143442ca465c"},
+    {"path":"evidence/roller_fast_carve_gate_final_contact_sheet.jpg","bytes":37657,"sha256":"ec87c741187368233e60bc5af703d57d5a8dcfc645933f277d3252f05c6b672b"},
+    {"path":"evidence/roller_fast_carve_gate_final_metrics.csv","bytes":243208,"sha256":"95827e6f74057bed42b73c6ebf53b786621cffe6f0a07155f9619547511c71fd"},
+    {"path":"evidence/roller_fast_carve_gate_final_summary.json","bytes":1285,"sha256":"a8399756e06d896a8121b1e6f7a2b84da23c82e8ef36ec0314a2185600425bee"},
+    {"path":"logs/dynamic_crouch_train.log","bytes":932702,"sha256":"ac9209729791dc3b678184e687c693fc13c5c3860632ef504449ecd61716239f"},
+    {"path":"logs/dynamic_crouch.tfevents.1788245485","bytes":997782,"sha256":"1d4d3a9d92953f47b82398840e939992d2e07f4135a36c51f6538f68fc8664db"},
+    {"path":"logs/spin_train.log","bytes":1084725,"sha256":"f93fcd553837d1b15af0dc537f3a91e67051c4a52031bd30f534419f02b37832"},
+    {"path":"logs/spin.tfevents.1788231735","bytes":1091203,"sha256":"a9410bdeeeacdf58d3e39813f71bfa6bd9237152286e5e969414307aec92e198"},
+    {"path":"source-patches/0001-add-forward-speed-tracking-reward.patch","bytes":1215,"sha256":"491084694b1aac78af5629b0e7d1e2d051a03640ac2b69b670078e076dea30e3"},
+    {"path":"source-patches/0002-add-continuous-roller-showcase.patch","bytes":74280,"sha256":"034e5a4d1c56f525f755126846a58a659c002cafca251b95bdee81298c09df89"},
+    {"path":"UPSTREAM_LICENSE.txt","bytes":11553,"sha256":"48a029ca4cffafe32428e9f7d3f6a54ce637fac5327a9ccf88c93cb3c40e5a8a"},
+    {"path":"weights/dynamic_crouch_model_400.onnx","bytes":793779,"sha256":"c330f6de0ca1d2818e16d3732a9af29074398dc0c171b0f4add4ea8a84b7eba8"},
+    {"path":"weights/dynamic_crouch_model_400.pt","bytes":4855651,"sha256":"19a1e5a35cd09a03f7bd780808bb5bebd2babb72afae36aa762ccade2abf55af"},
+    {"path":"weights/spin_model_500.onnx","bytes":793826,"sha256":"e4ff68c80f1ef34fd8dde10b39fedbab42a21c5b2761821746d48a904b9d56a5"},
+    {"path":"weights/spin_model_500.pt","bytes":4855651,"sha256":"7ab7e3011b4d916ccb75a3a67225f0c359d23f1811bd48c020c6709efdb780ca"},
+    {"path":"weights/upstream_roller.onnx","bytes":793685,"sha256":"cf05651d2708a2f9364212e86b866c97a70ace8131c492500105e8f28bf99afd"}
+  ]
+}

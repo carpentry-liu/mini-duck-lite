@@ -76,7 +76,7 @@ MUJOCO_GL=egl uv run python scripts/run_roller_showcase.py \
 | 旋转区域内漂移 | 6.8 cm | 通过 |
 | 最终平面速度 | 0.0002 m/s | 通过 |
 
-最终回放、逐控制步 CSV 和 JSON 摘要保存在外置工作树的 `artifacts/showcase/`。大文件不提交到 Git；脚本、训练任务、场景和复现命令进入版本控制。
+最终回放、逐控制步 CSV、JSON 摘要、训练日志、TensorBoard event、checkpoint、ONNX 与可重放源码补丁现已组成 [`roller-fast-carve-v1`](../../training/releases/roller-fast-carve-v1/README.md) 公开发布包。模型与视频使用 Git LFS，`MANIFEST.json` 保存逐文件 SHA-256；发布标签为 `roller-showcase-v1.0.0`。
 
 ## 限制
 

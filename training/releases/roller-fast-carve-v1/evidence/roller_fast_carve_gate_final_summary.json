@@ -1,0 +1,33 @@
+{
+  "scenario": "远距离轮滑 → 90° 转弯 → 下蹲穿杆 → 360° 旋转 → 急停歪头",
+  "duration_s": 19.48,
+  "route_length_m": 4.631259445732981,
+  "long_approach_m": 1.3740594289462071,
+  "corner_turn_deg": 92.60487474548742,
+  "turn_entry_speed_mps": 0.5351426458368591,
+  "turn_min_speed_mps": 0.25768009386503027,
+  "turn_path_m": 0.34824968118764993,
+  "corner_final_yaw_rate_radps": 0.22282947764068456,
+  "gate_crossed_during_crouch": true,
+  "gate_crossing_speed_mps": 0.3895349370492705,
+  "gate_window_min_speed_mps": 0.3439458094009045,
+  "gate_crossing_trunk_z_m": 0.07218109640994563,
+  "gate_crossing_head_pitch_rad": 0.8558113927058649,
+  "gate_crossing_jaw_z_m": 0.1609530246635257,
+  "crouch_progress_m": 1.2895828758225958,
+  "recovered_after_gate": true,
+  "spin_yaw_deg": 344.8362484593282,
+  "spin_drift_m": 0.06766140596184315,
+  "spin_min_upright": 0.998188853263855,
+  "final_planar_speed_mps": 0.00018536764417629832,
+  "complete_route_pass": true,
+  "checks": {
+    "long_approach": true,
+    "carving_turn": true,
+    "moving_crouch_gate": true,
+    "spin": true,
+    "hard_stop": true
+  },
+  "video": "artifacts/showcase/roller_fast_carve_gate_final_50fps.mp4",
+  "metrics": "artifacts/showcase/roller_fast_carve_gate_final_metrics.csv"
+}

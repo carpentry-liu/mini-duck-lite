@@ -76,6 +76,10 @@ V0.4 的关键变化是 **No Hardware, No Done**：仿真、mock 和视频可以
 
 正式训练证据见 [`2026-08-31-upstream-walk-training.md`](docs/experiments/2026-08-31-upstream-walk-training.md)；传播动作的设计、训练与检查点对比见 [`2026-09-01-drunken-boxing-training.md`](docs/experiments/2026-09-01-drunken-boxing-training.md)；带速甩弯、动态低头穿杆训练与逐项验收见 [`2026-09-01-roller-obstacle-showcase.md`](docs/experiments/2026-09-01-roller-obstacle-showcase.md)。这些结果证明训练链路能用，不代表 10DOF 真机已经会走或会做同样动作。
 
+### 可下载训练发布包
+
+[`roller-fast-carve-v1.0.0`](training/releases/roller-fast-carve-v1/README.md) 已公开保存完整复现材料：源码补丁、PPO checkpoint、ONNX、TensorBoard event、终端日志、逐控制步 CSV、验收 JSON 和 1280×720 / 50 fps 视频。每个载荷都有 SHA-256；大文件使用 Git LFS。该发布包证据等级为 **SIM**，不冒充真机成果。
+
 ## 强化学习是在 WSL2 里训练的吗
 
 **是。** 训练运行在 Windows 11 的 WSL2 Ubuntu 中，NVIDIA GPU 通过 WSL CUDA 提供给 PyTorch/MuJoCo。PowerShell 负责启动命令和管理文件，不执行 PPO 本身。

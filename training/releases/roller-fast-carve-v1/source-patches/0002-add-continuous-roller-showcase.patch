@@ -1,0 +1,1618 @@
+diff --git a/scripts/calibrate_spin_turn.py b/scripts/calibrate_spin_turn.py
+new file mode 100644
+index 0000000..aad546a
+--- /dev/null
++++ b/scripts/calibrate_spin_turn.py
+@@ -0,0 +1,212 @@
++#!/usr/bin/env python3
++"""Measure whether a time-compressed spin policy can make a stable corner turn."""
++
++from __future__ import annotations
++
++import argparse
++import itertools
++import math
++from pathlib import Path
++
++import mujoco
++import numpy as np
++
++from infer_policy import DEFAULT_POSE, PolicyInference
++
++
++ROOT = Path(__file__).resolve().parents[1]
++SCENE = ROOT / "src/mjlab_microduck/robot/microduck/scene_roller_showcase.xml"
++ROLLER = ROOT / "policies/upstream/roller.onnx"
++SPIN = ROOT / "policies/trained/spin_model_500.onnx"
++
++
++def yaw_from_quat(quat: np.ndarray) -> float:
++    qw, qx, qy, qz = quat
++    return math.atan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz))
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument(
++        "--periods",
++        type=float,
++        nargs="+",
++        default=(0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0),
++    )
++    parser.add_argument(
++        "--runup-commands", type=float, nargs="+", default=(0.0,),
++        help="Roller forward commands applied before the turn.",
++    )
++    parser.add_argument(
++        "--runup-seconds", type=float, nargs="+", default=(4.0,),
++        help="Run-up durations after a 0.8 s settle and 0.5 s command ramp.",
++    )
++    parser.add_argument(
++        "--blend-seconds", type=float, nargs="+", default=(0.0,),
++        help="Action cross-fade durations from roller to spin policy.",
++    )
++    parser.add_argument(
++        "--spin-weights", type=float, nargs="+", default=(1.0,),
++        help="Maximum spin-policy share; the roller policy remains active below 1.0.",
++    )
++    args = parser.parse_args()
++
++    model = mujoco.MjModel.from_xml_path(str(SCENE))
++    model.opt.timestep = 0.005
++    data = mujoco.MjData(model)
++    for joint_id in range(model.njnt):
++        name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, joint_id)
++        if name and name.startswith("passive_"):
++            model.dof_frictionloss[model.jnt_dofadr[joint_id]] = 0.003
++
++    policy = PolicyInference(
++        model,
++        data,
++        walking_onnx_path=str(ROLLER),
++        ground_pick_onnx_path=str(SPIN),
++        ground_pick_period=4.25,
++        use_projected_gravity=True,
++        new_cmd_obs=True,
++    )
++    freejoint_id = mujoco.mj_name2id(
++        model, mujoco.mjtObj.mjOBJ_JOINT, "trunk_base_freejoint"
++    )
++    qpos_adr = int(model.jnt_qposadr[freejoint_id])
++    qvel_adr = int(model.jnt_dofadr[freejoint_id])
++    control_dt = 0.02
++    decimation = 4
++
++    print(
++        "runup_cmd,runup_s,entry_speed_mps,blend_s,spin_weight,period_s,active_s,yaw_deg,"
++        "turn_path_m,min_speed_mps,end_speed_mps,final_rate_radps,drift_m,min_upright"
++    )
++    for runup_command, runup_s, blend_s, spin_weight, period in itertools.product(
++        args.runup_commands,
++        args.runup_seconds,
++        args.blend_seconds,
++        args.spin_weights,
++        args.periods,
++    ):
++        mujoco.mj_resetData(model, data)
++        data.qpos[qpos_adr:qpos_adr + 7] = (-1.8, -0.65, 0.1385, 1.0, 0.0, 0.0, 0.0)
++        for index, qpos_index in enumerate(policy.joint_qpos_indices):
++            data.qpos[qpos_index] = DEFAULT_POSE[index]
++        data.ctrl[:] = DEFAULT_POSE[:model.nu]
++        policy.last_action[:] = 0.0
++        policy.vel_cmd[:] = 0.0
++        policy.head_offset[:] = 0.0
++        policy.current_policy = "walking"
++        policy.ort_session = policy.walking_session
++        policy.ground_pick_mode = False
++        policy._update_command()
++        mujoco.mj_forward(model, data)
++
++        previous_yaw = yaw_from_quat(data.qpos[qpos_adr + 3:qpos_adr + 7])
++        unwrapped_yaw = previous_yaw
++        min_upright = 1.0
++
++        def step_once() -> None:
++            nonlocal previous_yaw, unwrapped_yaw, min_upright
++            action = policy.infer()
++            policy.apply_action(action)
++            for _ in range(decimation):
++                mujoco.mj_step(model, data)
++            yaw = yaw_from_quat(data.qpos[qpos_adr + 3:qpos_adr + 7])
++            unwrapped_yaw += math.atan2(
++                math.sin(yaw - previous_yaw), math.cos(yaw - previous_yaw)
++            )
++            previous_yaw = yaw
++            min_upright = min(min_upright, float(-policy.get_projected_gravity()[2]))
++
++        for _ in range(round(0.8 / control_dt)):
++            step_once()
++
++        for runup_step in range(round(runup_s / control_dt)):
++            elapsed = runup_step * control_dt
++            ramp = min(1.0, max(0.0, elapsed / 0.5))
++            ramp = ramp * ramp * (3.0 - 2.0 * ramp)
++            policy.vel_cmd[:] = (runup_command * ramp, 0.0, 0.0)
++            policy._update_command()
++            step_once()
++
++        entry_quat = data.qpos[qpos_adr + 3:qpos_adr + 7].copy()
++        entry_body_velocity = policy.quat_rotate_inverse(
++            entry_quat, data.qvel[qvel_adr:qvel_adr + 3].copy()
++        )
++        entry_speed = float(entry_body_velocity[0])
++        yaw_at_start = unwrapped_yaw
++        turn_start_xy = data.qpos[qpos_adr:qpos_adr + 2].copy()
++        previous_turn_xy = turn_start_xy.copy()
++        turn_path = 0.0
++        min_speed = float("inf")
++        policy.ground_pick_period = period
++        policy.ground_pick_mode = True
++        policy.ground_pick_phase = 0.0
++        policy.ort_session = policy.ground_pick_session
++        policy.current_policy = "spin_turn"
++        policy._update_command()
++        active_steps = 0
++        while policy.ground_pick_mode:
++            policy.update_ground_pick_phase(control_dt)
++            spin_command = policy.command.copy()
++            spin_obs = policy.get_observations().reshape(1, -1)
++            spin_action = policy.ground_pick_session.run(
++                [policy.ground_pick_session.get_outputs()[0].name],
++                {policy.ground_pick_session.get_inputs()[0].name: spin_obs},
++            )[0].squeeze(0)
++            roller_command = np.zeros_like(policy.command)
++            roller_command[0] = runup_command
++            policy.command[:] = roller_command
++            roller_obs = policy.get_observations().reshape(1, -1)
++            roller_action = policy.walking_session.run(
++                [policy.walking_session.get_outputs()[0].name],
++                {policy.walking_session.get_inputs()[0].name: roller_obs},
++            )[0].squeeze(0)
++            policy.command[:] = spin_command
++            elapsed = active_steps * control_dt
++            alpha = 1.0 if blend_s <= 0.0 else min(1.0, elapsed / blend_s)
++            alpha = alpha * alpha * (3.0 - 2.0 * alpha)
++            mix = alpha * spin_weight
++            action = ((1.0 - mix) * roller_action + mix * spin_action).astype(np.float32)
++            policy.last_action = action.copy()
++            policy.apply_action(action)
++            for _ in range(decimation):
++                mujoco.mj_step(model, data)
++            yaw = yaw_from_quat(data.qpos[qpos_adr + 3:qpos_adr + 7])
++            unwrapped_yaw += math.atan2(
++                math.sin(yaw - previous_yaw), math.cos(yaw - previous_yaw)
++            )
++            previous_yaw = yaw
++            min_upright = min(min_upright, float(-policy.get_projected_gravity()[2]))
++            current_turn_xy = data.qpos[qpos_adr:qpos_adr + 2].copy()
++            turn_path += float(np.linalg.norm(current_turn_xy - previous_turn_xy))
++            previous_turn_xy = current_turn_xy
++            quat = data.qpos[qpos_adr + 3:qpos_adr + 7].copy()
++            body_velocity = policy.quat_rotate_inverse(
++                quat, data.qvel[qvel_adr:qvel_adr + 3].copy()
++            )
++            min_speed = min(min_speed, float(np.linalg.norm(body_velocity[:2])))
++            active_steps += 1
++
++        for _ in range(round(0.8 / control_dt)):
++            policy.vel_cmd[:] = 0.0
++            policy._update_command()
++            step_once()
++
++        drift = float(np.linalg.norm(data.qpos[qpos_adr:qpos_adr + 2] - turn_start_xy))
++        end_quat = data.qpos[qpos_adr + 3:qpos_adr + 7].copy()
++        end_body_velocity = policy.quat_rotate_inverse(
++            end_quat, data.qvel[qvel_adr:qvel_adr + 3].copy()
++        )
++        print(
++            f"{runup_command:.2f},{runup_s:.2f},{entry_speed:.3f},{blend_s:.2f},"
++            f"{spin_weight:.2f},"
++            f"{period:.2f},{active_steps * control_dt:.2f},"
++            f"{math.degrees(unwrapped_yaw - yaw_at_start):.2f},"
++            f"{turn_path:.4f},{min_speed:.3f},{float(np.linalg.norm(end_body_velocity[:2])):.3f},"
++            f"{float(data.qvel[qvel_adr + 5]):.3f},{drift:.4f},{min_upright:.4f}"
++        )
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/run_roller_showcase.py b/scripts/run_roller_showcase.py
+new file mode 100644
+index 0000000..977beb7
+--- /dev/null
++++ b/scripts/run_roller_showcase.py
+@@ -0,0 +1,609 @@
++#!/usr/bin/env python3
++"""Render and measure the MicroDuck roller showcase without a GUI.
++
++This is an acceptance runner, not a canned animation: joint targets come from
++the supplied ONNX policies while MuJoCo advances the physics.  It produces an
++MP4 and a per-control-step CSV so motion can be checked from both pixels and
++numbers.
++"""
++
++from __future__ import annotations
++
++import argparse
++import csv
++import json
++import math
++import os
++from pathlib import Path
++
++import imageio.v2 as imageio
++import mujoco
++import numpy as np
++import onnxruntime as ort
++
++from infer_policy import DEFAULT_POSE, PolicyInference
++from mjlab_microduck.showcase import phase_at, smoothstep01, total_duration
++
++
++ROOT = Path(__file__).resolve().parents[1]
++SCENE = ROOT / "src/mjlab_microduck/robot/microduck/scene_roller_showcase.xml"
++DEFAULT_ROLLER = ROOT / "policies/upstream/roller.onnx"
++DEFAULT_CROUCH = ROOT / "policies/upstream/roller_crouch.onnx"
++START_X = -1.80
++START_Y = -0.65
++GATE_X = -0.583
++GATE_Y = 1.224
++LANE_HEADING_RAD = math.radians(112.2)
++LANE_FORWARD = np.asarray(
++    (math.cos(LANE_HEADING_RAD), math.sin(LANE_HEADING_RAD)), dtype=np.float64
++)
++LANE_LATERAL = np.asarray((-LANE_FORWARD[1], LANE_FORWARD[0]), dtype=np.float64)
++
++
++def _gate_coordinates(row: dict[str, float | str | bool]) -> tuple[float, float]:
++    offset = np.asarray(
++        (float(row["x_m"]) - GATE_X, float(row["y_m"]) - GATE_Y),
++        dtype=np.float64,
++    )
++    return float(offset @ LANE_FORWARD), float(offset @ LANE_LATERAL)
++
++
++def _yaw_from_quat(quat: np.ndarray) -> float:
++    qw, qx, qy, qz = quat
++    return math.atan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz))
++
++
++def _set_velocity_quiet(policy: PolicyInference, x: float) -> None:
++    policy.vel_cmd[:] = (x, 0.0, 0.0)
++    policy._update_policy_session()
++    policy._update_command()
++
++
++def _switch_cyclic_policy(
++    policy: PolicyInference,
++    session: ort.InferenceSession,
++    name: str,
++    period_s: float,
++) -> None:
++    policy.ground_pick_session = session
++    policy.ground_pick_period = period_s
++    policy.ground_pick_mode = True
++    policy.ground_pick_phase = 0.0
++    policy.ort_session = session
++    policy.current_policy = name
++    policy._update_command()
++
++
++def _finish_cyclic_policy(policy: PolicyInference) -> None:
++    policy.ground_pick_mode = False
++    policy.ground_pick_phase = 0.0
++    policy.current_policy = "walking"
++    policy.ort_session = policy.walking_session
++    policy._update_command()
++
++
++def _infer_session(
++    policy: PolicyInference,
++    session: ort.InferenceSession,
++    command: np.ndarray,
++) -> np.ndarray:
++    """Infer one policy against the shared physical state and action history."""
++    saved_command = policy.command.copy()
++    policy.command[:] = command
++    obs = policy.get_observations().reshape(1, -1)
++    action = session.run(
++        [session.get_outputs()[0].name],
++        {session.get_inputs()[0].name: obs},
++    )[0].squeeze(0).astype(np.float32)
++    policy.command[:] = saved_command
++    return action
++
++
++def build_parser() -> argparse.ArgumentParser:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--roller", type=Path, default=DEFAULT_ROLLER)
++    parser.add_argument("--crouch", type=Path, default=DEFAULT_CROUCH)
++    parser.add_argument("--spin", type=Path, default=None,
++                        help="Optional trained spin policy; without it the spin segment is a measured coast.")
++    parser.add_argument("--video", type=Path,
++                        default=ROOT / "artifacts/showcase/roller_showcase.mp4")
++    parser.add_argument("--metrics", type=Path,
++                        default=ROOT / "artifacts/showcase/roller_showcase_metrics.csv")
++    parser.add_argument("--summary", type=Path,
++                        default=ROOT / "artifacts/showcase/roller_showcase_summary.json")
++    parser.add_argument("--width", type=int, default=960)
++    parser.add_argument("--height", type=int, default=540)
++    parser.add_argument("--fps", type=int, default=50,
++                        help="Output frame rate; 50 matches the policy control rate exactly.")
++    parser.add_argument("--duration", type=float, default=total_duration())
++    parser.add_argument("--no-video", action="store_true")
++    return parser
++
++
++def main() -> None:
++    args = build_parser().parse_args()
++    for path in (args.roller, args.crouch):
++        if not path.is_file():
++            raise FileNotFoundError(path)
++    if args.spin is not None and not args.spin.is_file():
++        raise FileNotFoundError(args.spin)
++
++    model = mujoco.MjModel.from_xml_path(str(SCENE))
++    model.opt.timestep = 0.005
++    data = mujoco.MjData(model)
++
++    # Match inference.py and the training model: passive roller bearing loss.
++    for joint_id in range(model.njnt):
++        name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, joint_id)
++        if name and name.startswith("passive_"):
++            model.dof_frictionloss[model.jnt_dofadr[joint_id]] = 0.003
++
++    policy = PolicyInference(
++        model,
++        data,
++        walking_onnx_path=str(args.roller),
++        ground_pick_onnx_path=str(args.crouch),
++        ground_pick_period=4.0,
++        use_projected_gravity=True,
++        new_cmd_obs=True,
++    )
++    crouch_session = policy.ground_pick_session
++    spin_session = (
++        ort.InferenceSession(str(args.spin), providers=["CPUExecutionProvider"])
++        if args.spin is not None
++        else None
++    )
++
++    freejoint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "trunk_base_freejoint")
++    qpos_adr = int(model.jnt_qposadr[freejoint_id])
++    qvel_adr = int(model.jnt_dofadr[freejoint_id])
++    jaw_body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "jaw_soft")
++    head_pitch_joint_id = mujoco.mj_name2id(
++        model, mujoco.mjtObj.mjOBJ_JOINT, "head_pitch"
++    )
++    head_pitch_qpos_adr = int(model.jnt_qposadr[head_pitch_joint_id])
++    data.qpos[qpos_adr:qpos_adr + 7] = (START_X, START_Y, 0.1385, 1.0, 0.0, 0.0, 0.0)
++    for index, joint_qpos_index in enumerate(policy.joint_qpos_indices):
++        data.qpos[joint_qpos_index] = DEFAULT_POSE[index]
++    data.ctrl[:] = DEFAULT_POSE[: model.nu]
++    mujoco.mj_forward(model, data)
++
++    control_dt = 0.02
++    decimation = int(round(control_dt / model.opt.timestep))
++    render_dt = 1.0 / args.fps
++    next_render_time = 0.0
++    current_phase_name = None
++    last_forward_speed = 0.0
++    previous_action = np.zeros(model.nu, dtype=np.float32)
++    transition_from_action = previous_action.copy()
++    transition_started_at = -1.0
++    transition_duration = 0.12
++    camera_azimuth = 92.0
++    camera_distance = 2.35
++    camera_lookat = np.asarray((-0.85, -0.30, 0.14), dtype=np.float64)
++    rows: list[dict[str, float | str | bool]] = []
++    path_length_m = 0.0
++    previous_xy = data.qpos[qpos_adr:qpos_adr + 2].copy()
++
++    writer = None
++    renderer = None
++    if not args.no_video:
++        os.environ.setdefault("MUJOCO_GL", "egl")
++        args.video.parent.mkdir(parents=True, exist_ok=True)
++        writer = imageio.get_writer(
++            args.video,
++            fps=args.fps,
++            codec="libx264",
++            quality=8,
++            pixelformat="yuv420p",
++            macro_block_size=None,
++        )
++        renderer = mujoco.Renderer(model, height=args.height, width=args.width)
++
++    initial_yaw = _yaw_from_quat(data.qpos[qpos_adr + 3:qpos_adr + 7])
++    previous_yaw = initial_yaw
++    unwrapped_yaw = initial_yaw
++    steps = int(math.ceil(args.duration / control_dt))
++    try:
++        for step in range(steps):
++            time_s = step * control_dt
++            phase = phase_at(time_s)
++
++            if phase.name != current_phase_name:
++                transition_from_action = previous_action.copy()
++                # Cyclic crouch/spin policies need their learned first action
++                # intact.  Blend only when the roller policy takes control for
++                # braking or the final pose.
++                transition_duration = phase.action_blend_s or 0.12
++                transition_started_at = (
++                    time_s
++                    if phase.policy == "roller" or phase.action_blend_s > 0.0
++                    else time_s - transition_duration
++                )
++                # The run-up command already has a smooth velocity ramp; a
++                # second action-space blend changed the learned skate rhythm
++                # and produced an unintended speed/yaw surge.
++                if phase.name in {"settle", "long_approach"}:
++                    transition_started_at = time_s - transition_duration
++                if current_phase_name in {"carve_turn", "crouch_gate", "spin_360"}:
++                    _finish_cyclic_policy(policy)
++                current_phase_name = phase.name
++                if phase.policy == "crouch":
++                    assert phase.cycle_period is not None
++                    _switch_cyclic_policy(
++                        policy, crouch_session, "crouch", phase.cycle_period
++                    )
++                elif phase.policy in {"turn", "spin"} and spin_session is not None:
++                    assert phase.cycle_period is not None
++                    _switch_cyclic_policy(
++                        policy, spin_session, phase.name, phase.cycle_period
++                    )
++                else:
++                    _set_velocity_quiet(policy, phase.forward_command)
++                print(f"[{time_s:5.2f}s] phase={phase.name} policy={policy.current_policy}")
++
++            # The cyclic policies own the first three command slots.  The base
++            # roller policy receives velocity/head commands in its own segments.
++            if phase.policy in {"crouch", "turn", "spin"} and (
++                phase.policy == "crouch" or spin_session is not None
++            ):
++                policy.update_ground_pick_phase(control_dt)
++            elif phase.policy in {"turn", "spin"} and spin_session is None:
++                _set_velocity_quiet(policy, 0.0)
++            else:
++                head_alpha = 1.0
++                if phase.name == "head_tilt_finish":
++                    # Avoid an unrealistic step command on a head that accounts
++                    # for a large fraction of MicroDuck's mass.
++                    head_alpha = min(1.0, max(0.0, (time_s - phase.start) / 1.0))
++                policy.head_offset[:] = np.asarray(phase.head_command) * head_alpha
++                forward_command = phase.forward_command
++                if phase.name == "long_approach":
++                    # Ease into the velocity command rather than kicking the
++                    # learned controller from zero to full speed in one tick.
++                    command_alpha = smoothstep01((time_s - phase.start) / 0.50)
++                    forward_command *= command_alpha
++                if phase.name in {"hard_brake", "head_tilt_finish"}:
++                    # The roller policy interprets zero as coasting.  Use a
++                    # small hysteretic counter-command until the measured body
++                    # speed is near zero, then coast instead of reversing.
++                    if last_forward_speed > 0.04:
++                        forward_command = -0.50
++                    elif last_forward_speed < -0.04:
++                        forward_command = 0.25
++                    else:
++                        forward_command = 0.0
++                _set_velocity_quiet(policy, forward_command)
++
++            transition_alpha = smoothstep01(
++                (time_s - transition_started_at) / transition_duration
++            )
++            if phase.policy == "turn" and spin_session is not None:
++                spin_command = policy.command.copy()
++                spin_action = _infer_session(policy, spin_session, spin_command)
++                roller_command = np.zeros_like(policy.command)
++                roller_command[0] = phase.forward_command
++                roller_action = _infer_session(
++                    policy, policy.walking_session, roller_command
++                )
++                mix = transition_alpha * phase.action_mix
++                action = (
++                    (1.0 - mix) * roller_action + mix * spin_action
++                ).astype(np.float32)
++                policy.last_action = action.copy()
++            else:
++                action = policy.infer()
++            if phase.policy != "turn" and transition_alpha < 1.0:
++                action = (
++                    (1.0 - transition_alpha) * transition_from_action
++                    + transition_alpha * action
++                ).astype(np.float32)
++                # The last-action observation must describe what was applied,
++                # not the unblended policy output returned by infer().
++                policy.last_action = action.copy()
++            policy.apply_action(action)
++            previous_action = action.copy()
++            for _ in range(decimation):
++                mujoco.mj_step(model, data)
++
++            quat = data.qpos[qpos_adr + 3:qpos_adr + 7].copy()
++            world_velocity = data.qvel[qvel_adr:qvel_adr + 3].copy()
++            body_velocity = policy.quat_rotate_inverse(quat, world_velocity)
++            last_forward_speed = float(body_velocity[0])
++            yaw = _yaw_from_quat(quat)
++            yaw_step = math.atan2(math.sin(yaw - previous_yaw), math.cos(yaw - previous_yaw))
++            unwrapped_yaw += yaw_step
++            previous_yaw = yaw
++            current_xy = data.qpos[qpos_adr:qpos_adr + 2].copy()
++            path_length_m += float(np.linalg.norm(current_xy - previous_xy))
++            previous_xy = current_xy
++            rows.append(
++                {
++                    "time_s": time_s,
++                    "phase": phase.name,
++                    "policy": policy.current_policy,
++                    "spin_policy_loaded": spin_session is not None,
++                    "x_m": float(data.qpos[qpos_adr]),
++                    "y_m": float(data.qpos[qpos_adr + 1]),
++                    "trunk_z_m": float(data.qpos[qpos_adr + 2]),
++                    "forward_mps": float(body_velocity[0]),
++                    "lateral_mps": float(body_velocity[1]),
++                    "planar_speed_mps": float(np.linalg.norm(body_velocity[:2])),
++                    "jaw_z_m": float(data.xpos[jaw_body_id, 2]),
++                    "head_pitch_rad": float(data.qpos[head_pitch_qpos_adr]),
++                    "yaw_rate_radps": float(data.qvel[qvel_adr + 5]),
++                    "yaw_delta_deg": math.degrees(unwrapped_yaw - initial_yaw),
++                    "upright_score": float(-policy.get_projected_gravity()[2]),
++                }
++            )
++
++            if phase.name in {"settle", "long_approach"}:
++                target_camera_distance = 2.35
++                target_camera_azimuth = 92.0
++                target_camera_lookat = np.asarray((-0.85, -0.30, 0.14))
++            elif phase.name == "carve_turn":
++                target_camera_distance = 1.05
++                target_camera_azimuth = 138.0
++                target_camera_lookat = np.asarray(
++                    (float(data.qpos[qpos_adr]), float(data.qpos[qpos_adr + 1]), 0.14)
++                )
++            elif phase.name in {"corner_exit", "crouch_gate", "exit_gate"}:
++                target_camera_distance = 1.12
++                target_camera_azimuth = 58.0
++                target_camera_lookat = np.asarray(
++                    (float(data.qpos[qpos_adr]), float(data.qpos[qpos_adr + 1]) + 0.10, 0.14)
++                )
++            elif phase.name == "spin_360":
++                target_camera_distance = 0.88
++                # Hold the gate-side camera through the spin.  Swinging behind
++                # the bar during this transition briefly hid the robot.
++                target_camera_azimuth = 58.0
++                target_camera_lookat = np.asarray(
++                    (float(data.qpos[qpos_adr]), float(data.qpos[qpos_adr + 1]), 0.14)
++                )
++            else:
++                target_camera_distance = 0.62
++                target_camera_azimuth = 175.0
++                target_camera_lookat = np.asarray(
++                    (float(data.qpos[qpos_adr]), float(data.qpos[qpos_adr + 1]), 0.14)
++                )
++            # A damped camera avoids a visible cut when the choreography moves
++            # between forward motion, spin and the final close-up.
++            camera_alpha = 1.0 - math.exp(-control_dt / 0.35)
++            camera_distance += (target_camera_distance - camera_distance) * camera_alpha
++            camera_azimuth += (target_camera_azimuth - camera_azimuth) * camera_alpha
++            camera_lookat += (target_camera_lookat - camera_lookat) * camera_alpha
++
++            if renderer is not None and writer is not None and time_s + 1e-9 >= next_render_time:
++                camera = mujoco.MjvCamera()
++                camera.type = mujoco.mjtCamera.mjCAMERA_FREE
++                camera.lookat[:] = camera_lookat
++                camera.distance = camera_distance
++                camera.azimuth = camera_azimuth
++                camera.elevation = -13.0
++                renderer.update_scene(data, camera=camera)
++                writer.append_data(renderer.render())
++                next_render_time += render_dt
++    finally:
++        if writer is not None:
++            writer.close()
++        if renderer is not None:
++            renderer.close()
++
++    args.metrics.parent.mkdir(parents=True, exist_ok=True)
++    with args.metrics.open("w", encoding="utf-8", newline="") as file:
++        csv_writer = csv.DictWriter(file, fieldnames=rows[0].keys())
++        csv_writer.writeheader()
++        csv_writer.writerows(rows)
++
++    start_x = float(rows[0]["x_m"])
++    end_x = float(rows[-1]["x_m"])
++    min_z = min(float(row["trunk_z_m"]) for row in rows)
++    min_upright = min(float(row["upright_score"]) for row in rows)
++    max_speed = max(float(row["forward_mps"]) for row in rows)
++    approach_rows = [row for row in rows if row["phase"] == "long_approach"]
++    approach_distance = 0.0
++    if approach_rows:
++        approach_distance = math.hypot(
++            float(approach_rows[-1]["x_m"]) - float(approach_rows[0]["x_m"]),
++            float(approach_rows[-1]["y_m"]) - float(approach_rows[0]["y_m"]),
++        )
++    crouch_rows = [row for row in rows if row["phase"] == "crouch_gate"]
++    exit_gate_rows = [row for row in rows if row["phase"] == "exit_gate"]
++    turn_rows = [row for row in rows if row["phase"] == "carve_turn"]
++    corner_exit_rows = [row for row in rows if row["phase"] == "corner_exit"]
++    corner_delta = 0.0
++    corner_final_rate = 0.0
++    turn_path = 0.0
++    turn_entry_speed = 0.0
++    turn_min_speed = 0.0
++    if turn_rows:
++        corner_delta = (
++            float(turn_rows[-1]["yaw_delta_deg"])
++            - float(turn_rows[0]["yaw_delta_deg"])
++        )
++        turn_entry_speed = float(turn_rows[0]["planar_speed_mps"])
++        turn_min_speed = min(float(row["planar_speed_mps"]) for row in turn_rows)
++        for previous, current in zip(turn_rows, turn_rows[1:]):
++            turn_path += math.hypot(
++                float(current["x_m"]) - float(previous["x_m"]),
++                float(current["y_m"]) - float(previous["y_m"]),
++            )
++        corner_window = corner_exit_rows[-max(1, int(round(0.3 / control_dt))):]
++        corner_final_rate = sum(
++            float(row["yaw_rate_radps"]) for row in corner_window
++        ) / len(corner_window)
++    gate_window = [row for row in crouch_rows if (
++        abs(_gate_coordinates(row)[0]) <= 0.15
++        and abs(_gate_coordinates(row)[1]) <= 0.20
++    )]
++    crossing_row = min(
++        gate_window, key=lambda row: abs(_gate_coordinates(row)[0])
++    ) if gate_window else None
++    crouch_longitudinal = [_gate_coordinates(row)[0] for row in crouch_rows]
++    gate_crossed = bool(
++        crouch_rows
++        and min(crouch_longitudinal) <= -0.08
++        and max(crouch_longitudinal) >= 0.12
++        and crossing_row is not None
++    )
++    gate_crossing_speed = (
++        float(crossing_row["planar_speed_mps"]) if crossing_row else 0.0
++    )
++    gate_crossing_trunk_z = (
++        float(crossing_row["trunk_z_m"]) if crossing_row else float("inf")
++    )
++    gate_crossing_head_pitch = (
++        float(crossing_row["head_pitch_rad"]) if crossing_row else 0.0
++    )
++    gate_crossing_jaw_z = (
++        float(crossing_row["jaw_z_m"]) if crossing_row else float("inf")
++    )
++    gate_window_min_speed = min(
++        (float(row["planar_speed_mps"]) for row in gate_window), default=0.0
++    )
++    crouch_progress = (
++        max(crouch_longitudinal) - min(crouch_longitudinal)
++        if crouch_rows else 0.0
++    )
++    crouch_min_trunk_z = min(
++        (float(row["trunk_z_m"]) for row in crouch_rows), default=float("inf")
++    )
++    recovered_after_gate = bool(
++        crossing_row
++        and any(
++            float(row["time_s"]) > float(crossing_row["time_s"])
++            and _gate_coordinates(row)[0] >= 0.12
++            and float(row["trunk_z_m"]) >= crouch_min_trunk_z + 0.025
++            and float(row["jaw_z_m"]) >= gate_crossing_jaw_z + 0.015
++            for row in (*crouch_rows, *exit_gate_rows)
++        )
++    )
++    spin_rows = [row for row in rows if row["phase"] == "spin_360"]
++    spin_delta = (
++        float(spin_rows[-1]["yaw_delta_deg"]) - float(spin_rows[0]["yaw_delta_deg"])
++        if spin_rows
++        else 0.0
++    )
++    spin_drift = 0.0
++    spin_min_upright = 0.0
++    spin_final_yaw_rate = 0.0
++    if spin_rows:
++        dx = float(spin_rows[-1]["x_m"]) - float(spin_rows[0]["x_m"])
++        dy = float(spin_rows[-1]["y_m"]) - float(spin_rows[0]["y_m"])
++        spin_drift = math.hypot(dx, dy)
++        spin_min_upright = min(float(row["upright_score"]) for row in spin_rows)
++        final_window = spin_rows[-max(1, int(round(0.4 / control_dt))):]
++        spin_final_yaw_rate = sum(float(row["yaw_rate_radps"]) for row in final_window) / len(final_window)
++    spin_pass = bool(
++        spin_session is not None
++        and 315.0 <= spin_delta <= 405.0
++        # The marker radius is 0.24 m; a 0.15 m centre displacement keeps the
++        # whole trick visibly inside its marked spin zone.
++        and spin_drift <= 0.15
++        and spin_min_upright >= 0.95
++        and abs(spin_final_yaw_rate) <= 0.25
++    )
++    final_speed = math.hypot(
++        float(rows[-1]["forward_mps"]), float(rows[-1]["lateral_mps"])
++    )
++    route_pass = bool(
++        approach_distance >= 1.0
++        and 75.0 <= corner_delta <= 105.0
++        and turn_entry_speed >= 0.45
++        and turn_min_speed >= 0.20
++        and turn_path >= 0.30
++        and abs(corner_final_rate) <= 0.30
++        and gate_crossed
++        and gate_crossing_speed >= 0.25
++        and gate_window_min_speed >= 0.20
++        and gate_crossing_trunk_z <= 0.10
++        and gate_crossing_jaw_z <= 0.19
++        and crouch_progress >= 0.30
++        and recovered_after_gate
++        and spin_pass
++        and final_speed <= 0.06
++    )
++    summary = {
++        "scenario": "远距离轮滑 → 90° 转弯 → 下蹲穿杆 → 360° 旋转 → 急停歪头",
++        "duration_s": args.duration,
++        "route_length_m": path_length_m,
++        "long_approach_m": approach_distance,
++        "corner_turn_deg": corner_delta,
++        "turn_entry_speed_mps": turn_entry_speed,
++        "turn_min_speed_mps": turn_min_speed,
++        "turn_path_m": turn_path,
++        "corner_final_yaw_rate_radps": corner_final_rate,
++        "gate_crossed_during_crouch": gate_crossed,
++        "gate_crossing_speed_mps": gate_crossing_speed,
++        "gate_window_min_speed_mps": gate_window_min_speed,
++        "gate_crossing_trunk_z_m": gate_crossing_trunk_z,
++        "gate_crossing_head_pitch_rad": gate_crossing_head_pitch,
++        "gate_crossing_jaw_z_m": gate_crossing_jaw_z,
++        "crouch_progress_m": crouch_progress,
++        "recovered_after_gate": recovered_after_gate,
++        "spin_yaw_deg": spin_delta,
++        "spin_drift_m": spin_drift,
++        "spin_min_upright": spin_min_upright,
++        "final_planar_speed_mps": final_speed,
++        "complete_route_pass": route_pass,
++        "checks": {
++            "long_approach": approach_distance >= 1.0,
++            "carving_turn": 75.0 <= corner_delta <= 105.0
++            and turn_entry_speed >= 0.45
++            and turn_min_speed >= 0.20
++            and turn_path >= 0.30
++            and abs(corner_final_rate) <= 0.30,
++            "moving_crouch_gate": gate_crossed
++            and gate_crossing_speed >= 0.25
++            and gate_window_min_speed >= 0.20
++            and gate_crossing_trunk_z <= 0.10
++            and gate_crossing_jaw_z <= 0.19
++            and crouch_progress >= 0.30
++            and recovered_after_gate,
++            "spin": spin_pass,
++            "hard_stop": final_speed <= 0.06,
++        },
++        "video": None if args.no_video else str(args.video),
++        "metrics": str(args.metrics),
++    }
++    args.summary.parent.mkdir(parents=True, exist_ok=True)
++    args.summary.write_text(
++        json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
++    )
++    print("\nAcceptance summary")
++    print(f"  displacement: {end_x - start_x:+.3f} m")
++    print(f"  route length: {path_length_m:.3f} m")
++    print(f"  long approach: {approach_distance:.3f} m")
++    print(f"  corner turn: {corner_delta:+.1f} deg")
++    print(f"  turn entry/min speed: {turn_entry_speed:.3f} / {turn_min_speed:.3f} m/s")
++    print(f"  turn curved path: {turn_path:.3f} m")
++    print(f"  corner final yaw rate: {corner_final_rate:+.3f} rad/s")
++    print(f"  crouch crossed gate: {'PASS' if gate_crossed else 'FAIL'}")
++    print(f"  speed at/around gate: {gate_crossing_speed:.3f} / {gate_window_min_speed:.3f} m/s")
++    print(
++        f"  trunk/jaw/head-pitch at gate: {gate_crossing_trunk_z:.3f} m / "
++        f"{gate_crossing_jaw_z:.3f} m / {gate_crossing_head_pitch:.3f} rad"
++    )
++    print(f"  crouch forward progress: {crouch_progress:.3f} m")
++    print(f"  recovered only after gate: {'PASS' if recovered_after_gate else 'FAIL'}")
++    print(f"  peak forward speed: {max_speed:+.3f} m/s")
++    print(f"  minimum trunk height: {min_z:.3f} m")
++    print(f"  minimum upright score: {min_upright:.3f} (1.0 is upright)")
++    print(f"  spin segment yaw: {spin_delta:+.1f} deg")
++    print(f"  spin drift: {spin_drift:.3f} m")
++    print(f"  spin minimum upright: {spin_min_upright:.3f}")
++    print(f"  spin final yaw rate: {spin_final_yaw_rate:+.3f} rad/s")
++    print(f"  spin acceptance: {'PASS' if spin_pass else 'FAIL'}")
++    print(f"  final planar speed: {final_speed:.3f} m/s")
++    print(f"  complete route acceptance: {'PASS' if route_pass else 'FAIL'}")
++    print(f"  metrics: {args.metrics}")
++    print(f"  summary: {args.summary}")
++    if not args.no_video:
++        print(f"  video: {args.video}")
++    if spin_session is None:
++        print("  NOTE: --spin not supplied; spin segment intentionally coasted and is not accepted.")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/serve_training_preview.py b/scripts/serve_training_preview.py
+new file mode 100644
+index 0000000..d29caac
+--- /dev/null
++++ b/scripts/serve_training_preview.py
+@@ -0,0 +1,468 @@
++#!/usr/bin/env python3
++"""Serve a live rendered preview of the newest spin training checkpoint.
++
++The 4096 training environments remain headless.  This sidecar watches the ONNX
++export in the run directory, loads it into one MuJoCo evaluation environment,
++and exposes the resulting frames on a tiny local web page.
++"""
++
++from __future__ import annotations
++
++import argparse
++import io
++import json
++import math
++import os
++import re
++import threading
++import time
++from http import HTTPStatus
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++from pathlib import Path
++
++import mujoco
++import numpy as np
++import onnxruntime as ort
++from PIL import Image
++
++from infer_policy import DEFAULT_POSE, PolicyInference
++
++
++ROOT = Path(__file__).resolve().parents[1]
++SCENE = ROOT / "src/mjlab_microduck/robot/microduck/scene_roller_showcase.xml"
++ROLLER = ROOT / "policies/upstream/roller.onnx"
++ITERATION_RE = re.compile(r"Learning iteration\s+(\d+)/")
++
++
++def newest_run() -> Path:
++    candidates = [path for path in (ROOT / "logs/rsl_rl/spin").glob("*") if path.is_dir()]
++    if not candidates:
++        raise FileNotFoundError("No spin run found under logs/rsl_rl/spin")
++    return max(candidates, key=lambda path: path.stat().st_mtime)
++
++
++def newest_checkpoint(run_dir: Path) -> tuple[int, str]:
++    checkpoints = []
++    for path in run_dir.glob("model_*.pt"):
++        try:
++            checkpoints.append((int(path.stem.split("_")[-1]), path.name))
++        except ValueError:
++            continue
++    return max(checkpoints, default=(0, "waiting for model_0.pt"))
++
++
++class PreviewState:
++    def __init__(
++        self,
++        run_dir: Path,
++        log_file: Path | None,
++        width: int,
++        height: int,
++        replay_video: Path | None = None,
++    ):
++        self.run_dir = run_dir
++        self.log_file = log_file
++        self.replay_video = replay_video
++        self.width = width
++        self.height = height
++        self.lock = threading.Lock()
++        self.frame_ready = threading.Condition(self.lock)
++        self.frame_id = 0
++        self.jpeg = b""
++        self.stats: dict[str, object] = {
++            "status": "starting",
++            "run": run_dir.name,
++            "iteration": 0,
++            "checkpoint": "waiting",
++        }
++        self.stop = threading.Event()
++
++    def publish(self, frame: np.ndarray, stats: dict[str, object]) -> None:
++        buffer = io.BytesIO()
++        # Optimized JPEG encoding costs more CPU than the MuJoCo preview itself
++        # on WSL software rendering.  Regular encoding is substantially faster
++        # and keeps the live stream cadence stable.
++        Image.fromarray(frame).save(buffer, format="JPEG", quality=82)
++        with self.frame_ready:
++            self.jpeg = buffer.getvalue()
++            self.stats = stats
++            self.frame_id += 1
++            self.frame_ready.notify_all()
++
++    def snapshot(self) -> tuple[bytes, dict[str, object]]:
++        with self.lock:
++            return self.jpeg, dict(self.stats)
++
++    def wait_for_frame(self, after_id: int) -> tuple[bytes, int]:
++        with self.frame_ready:
++            self.frame_ready.wait_for(
++                lambda: self.frame_id != after_id or self.stop.is_set(),
++                timeout=1.0,
++            )
++            return self.jpeg, self.frame_id
++
++
++def read_iteration(log_file: Path | None, fallback: int) -> int:
++    if log_file is None or not log_file.is_file():
++        return fallback
++    try:
++        matches = ITERATION_RE.findall(log_file.read_text(encoding="utf-8", errors="ignore"))
++        return int(matches[-1]) if matches else fallback
++    except OSError:
++        return fallback
++
++
++def build_simulation(state: PreviewState, fps: int) -> None:
++    os.environ.setdefault("MUJOCO_GL", "egl")
++    onnx_files = list(state.run_dir.glob("*.onnx"))
++    if not onnx_files:
++        raise FileNotFoundError(f"No ONNX export in {state.run_dir}")
++    spin_path = onnx_files[0]
++
++    model = mujoco.MjModel.from_xml_path(str(SCENE))
++    model.opt.timestep = 0.005
++    data = mujoco.MjData(model)
++    renderer = mujoco.Renderer(model, height=state.height, width=state.width)
++
++    for joint_id in range(model.njnt):
++        name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, joint_id)
++        if name and name.startswith("passive_"):
++            model.dof_frictionloss[model.jnt_dofadr[joint_id]] = 0.003
++
++    policy = PolicyInference(
++        model,
++        data,
++        walking_onnx_path=str(ROLLER),
++        ground_pick_onnx_path=str(spin_path),
++        ground_pick_period=4.0,
++        use_projected_gravity=True,
++        new_cmd_obs=True,
++    )
++    loaded_mtime_ns = spin_path.stat().st_mtime_ns
++    freejoint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "trunk_base_freejoint")
++    qpos_adr = int(model.jnt_qposadr[freejoint_id])
++    qvel_adr = int(model.jnt_dofadr[freejoint_id])
++
++    def reset() -> None:
++        mujoco.mj_resetData(model, data)
++        data.qpos[qpos_adr:qpos_adr + 7] = (0.0, 0.0, 0.1385, 1.0, 0.0, 0.0, 0.0)
++        for index, joint_qpos_index in enumerate(policy.joint_qpos_indices):
++            data.qpos[joint_qpos_index] = DEFAULT_POSE[index]
++        data.ctrl[:] = DEFAULT_POSE[: model.nu]
++        policy.last_action[:] = 0.0
++        policy.ground_pick_mode = False
++        policy.current_policy = "walking"
++        policy.ort_session = policy.walking_session
++        policy.vel_cmd[:] = 0.0
++        policy.head_offset[:] = 0.0
++        policy._update_command()
++        mujoco.mj_forward(model, data)
++
++    reset()
++    episode_time = 0.0
++    spin_started = False
++    control_dt = 0.02
++    decimation = 4
++    next_frame = 0.0
++    frame_period = 1.0 / fps
++    last_iteration_check = 0.0
++    iteration = 0
++
++    try:
++        while not state.stop.is_set():
++            wall_start = time.monotonic()
++            episode_time += control_dt
++
++            # New exports arrive only at checkpoint boundaries.  Reload safely
++            # between episodes so a file replacement can never split a cycle.
++            if episode_time >= 5.0:
++                episode_time = 0.0
++                next_frame = 0.0
++                spin_started = False
++                try:
++                    mtime_ns = spin_path.stat().st_mtime_ns
++                    if mtime_ns != loaded_mtime_ns:
++                        policy.ground_pick_session = ort.InferenceSession(
++                            str(spin_path), providers=["CPUExecutionProvider"]
++                        )
++                        loaded_mtime_ns = mtime_ns
++                except (OSError, RuntimeError):
++                    pass
++                reset()
++
++            if episode_time >= 0.6 and not spin_started:
++                policy.trigger_ground_pick()
++                spin_started = True
++
++            policy.update_ground_pick_phase(control_dt)
++            action = policy.infer()
++            policy.apply_action(action)
++            for _ in range(decimation):
++                mujoco.mj_step(model, data)
++
++            if episode_time + 1e-9 >= next_frame:
++                camera = mujoco.MjvCamera()
++                camera.type = mujoco.mjtCamera.mjCAMERA_FREE
++                camera.lookat[:] = (float(data.qpos[qpos_adr]), 0.0, 0.14)
++                camera.distance = 0.78
++                camera.azimuth = 92.0
++                camera.elevation = -12.0
++                renderer.update_scene(data, camera=camera)
++                frame = renderer.render()
++
++                now = time.monotonic()
++                if now - last_iteration_check >= 2.0:
++                    checkpoint_iteration, checkpoint_name = newest_checkpoint(state.run_dir)
++                    iteration = read_iteration(state.log_file, iteration)
++                    last_iteration_check = now
++                else:
++                    checkpoint_iteration, checkpoint_name = newest_checkpoint(state.run_dir)
++
++                quat = data.qpos[qpos_adr + 3:qpos_adr + 7]
++                yaw = math.degrees(math.atan2(
++                    2.0 * (quat[0] * quat[3] + quat[1] * quat[2]),
++                    1.0 - 2.0 * (quat[2] ** 2 + quat[3] ** 2),
++                ))
++                state.publish(
++                    frame,
++                    {
++                        "status": "live",
++                        "run": state.run_dir.name,
++                        "iteration": iteration,
++                        "checkpoint_iteration": checkpoint_iteration,
++                        "checkpoint": checkpoint_name,
++                        "active_policy": policy.current_policy,
++                        "episode_time_s": round(episode_time, 2),
++                        "trunk_height_m": round(float(data.qpos[qpos_adr + 2]), 3),
++                        "yaw_deg": round(yaw, 1),
++                        "yaw_rate_radps": round(float(data.qvel[qvel_adr + 5]), 2),
++                        "upright": round(float(-policy.get_projected_gravity()[2]), 3),
++                        "export_updated": time.strftime(
++                            "%H:%M:%S", time.localtime(spin_path.stat().st_mtime)
++                        ),
++                    },
++                )
++                next_frame += frame_period
++
++            sleep_s = control_dt - (time.monotonic() - wall_start)
++            if sleep_s > 0:
++                time.sleep(sleep_s)
++    finally:
++        renderer.close()
++
++
++LIVE_HTML = """<!doctype html>
++<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
++<title>MicroDuck 训练画面</title><style>
++body{margin:0;background:#101419;color:#e8edf3;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
++main{max-width:1180px;margin:0 auto;padding:24px}.top{display:flex;justify-content:space-between;align-items:end;gap:20px;margin-bottom:16px}
++h1{font-size:24px;margin:0 0 4px}.muted{color:#9ba8b6}.live{color:#63d297;font-weight:700}.grid{display:grid;grid-template-columns:minmax(0,2.3fr) minmax(250px,1fr);gap:16px}
++.card{background:#171d24;border:1px solid #29323d;border-radius:10px;overflow:hidden}.frame{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#080b0e}
++.stats{padding:18px}.row{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid #29323d}.row:last-child{border:0}.value{font-family:ui-monospace,Consolas,monospace;text-align:right}
++.note{margin-top:14px;padding:12px 14px;border-left:3px solid #f0a629;background:#1e2020;color:#cdd5de}@media(max-width:760px){.grid{grid-template-columns:1fr}.top{align-items:start;flex-direction:column}}
++</style></head><body><main><div class="top"><div><h1>MicroDuck 旋转策略 · 训练旁路画面</h1><div class="muted">4096 环境在后台训练；此页用 1 个独立环境回放最新检查点。</div></div><div class="live">● LIVE</div></div>
++<div class="grid"><div class="card"><img id="frame" class="frame" src="/stream.mjpg" alt="MicroDuck 实时仿真"></div><div class="card stats" id="stats"></div></div>
++<div class="note">前期权重会摔倒或几乎不转，这是训练过程本身。每次保存新检查点后，旁路环境会在下一轮自动加载，不会伪造动作。</div>
++</main><script>
++const labels={iteration:'当前训练迭代',checkpoint:'已加载检查点',active_policy:'当前策略',episode_time_s:'本轮时间 / s',trunk_height_m:'机身高度 / m',yaw_deg:'偏航角 / °',yaw_rate_radps:'旋转速度 / rad·s⁻¹',upright:'直立度',export_updated:'权重更新时间'};
++async function updateStats(){try{const s=await fetch('/status.json',{cache:'no-store'}).then(r=>r.json());document.getElementById('stats').innerHTML=Object.entries(labels).map(([k,v])=>`<div class="row"><span class="muted">${v}</span><span class="value">${s[k]??'—'}</span></div>`).join('')}catch(e){}}
++setInterval(updateStats,1000);updateStats();</script></body></html>"""
++
++
++REPLAY_HTML = """<!doctype html>
++<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
++<title>MicroDuck 50fps 验收回放</title><style>
++body{margin:0;background:#101419;color:#e8edf3;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
++main{max-width:1180px;margin:0 auto;padding:24px}.top{display:flex;justify-content:space-between;align-items:end;gap:20px;margin-bottom:16px}
++h1{font-size:24px;margin:0 0 4px}.muted{color:#9ba8b6}.replay{color:#63d297;font-weight:700}.grid{display:grid;grid-template-columns:minmax(0,2.3fr) minmax(250px,1fr);gap:16px}
++.card{background:#171d24;border:1px solid #29323d;border-radius:10px;overflow:hidden}.frame{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#080b0e}
++.stats{padding:18px}.row{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid #29323d}.row:last-child{border:0}.value{font-family:ui-monospace,Consolas,monospace;text-align:right}
++.note{margin-top:14px;padding:12px 14px;border-left:3px solid #63d297;background:#17221e;color:#cdd5de}@media(max-width:760px){.grid{grid-template-columns:1fr}.top{align-items:start;flex-direction:column}}
++</style></head><body><main><div class="top"><div><h1 id="title">MicroDuck 动作 · 50fps 验收回放</h1><div class="muted" id="subtitle">由 ONNX 策略驱动的 MuJoCo 物理回放。</div></div><div class="replay">● 50 FPS REPLAY</div></div>
++<div class="grid"><div class="card"><video id="video" class="frame" src="/replay.mp4" autoplay loop muted playsinline controls preload="auto"></video></div><div class="card stats" id="stats"></div></div>
++<div class="note">这里播放真实 MuJoCo 物理验收录像，不用低帧率截图流冒充流畅视频；训练迭代和检查点仍独立保存。</div>
++</main><script>
++const video=document.getElementById('video');
++const n=(v,d=3)=>Number.isFinite(Number(v))?Number(v).toFixed(d):'—';
++async function updateStats(){try{const s=await fetch('/status.json',{cache:'no-store'}).then(r=>r.json());document.getElementById('title').textContent=s.title||'MicroDuck 动作 · 50fps 验收回放';document.getElementById('subtitle').textContent=s.subtitle||'由 ONNX 策略驱动的 MuJoCo 物理回放。';const common=[['回放文件',s.playback],['训练检查点',s.checkpoint],['编码帧率','50 fps'],['总帧数',s.duration_s?Math.round(s.duration_s*50):'—'],['时长',s.duration_s?`${n(s.duration_s,2)} s`:'—']];const route=s.route_length_m?[['完整路线',`${n(s.route_length_m,2)} m`],['入弯 / 最低速度',`${n(s.turn_entry_speed_mps,3)} / ${n(s.turn_min_speed_mps,3)} m/s`],['弧线 / 转角',`${n(s.turn_path_m*100,1)} cm / ${n(s.corner_turn_deg,1)}°`],['穿杆窗口最低速度',`${n(s.gate_window_min_speed_mps,3)} m/s`],['穿杆时嘴尖高度',`${n(s.gate_crossing_jaw_z_m*100,1)} cm`],['低姿滑行',`${n(s.crouch_progress_m,2)} m`],['离杆后再起身',s.recovered_after_gate?'PASS':'FAIL'],['旋转角度',`${n(s.spin_yaw_deg,1)}°`],['最终速度',`${n(s.final_planar_speed_mps,3)} m/s`]]:[['平均姿态误差',s.mean_pose_mae_rad?`${n(s.mean_pose_mae_rad*180/Math.PI,2)}°`:'—'],['最低直立度',n(s.min_upright)],['最大漂移',s.max_planar_drift_m?`${n(s.max_planar_drift_m*100,2)} cm`:'—'],['头部左右摆幅',s.head_yaw_range_rad?`${n(s.head_yaw_range_rad*180/Math.PI,1)}°`:'—']];const rows=[...common,...route,['验收结果',s.accepted?'PASS':'—']];document.getElementById('stats').innerHTML=rows.map(([k,v])=>`<div class="row"><span class="muted">${k}</span><span class="value">${v}</span></div>`).join('')}catch(e){}}
++video.addEventListener('canplay',()=>video.play().catch(()=>{}),{once:true});updateStats();</script></body></html>"""
++
++
++class Handler(BaseHTTPRequestHandler):
++    state: PreviewState
++
++    def _serve_replay_video(self) -> None:
++        path = self.state.replay_video
++        if path is None or not path.is_file():
++            self.send_error(HTTPStatus.NOT_FOUND, "replay not found")
++            return
++        size = path.stat().st_size
++        start, end = 0, size - 1
++        status = HTTPStatus.OK
++        range_header = self.headers.get("Range")
++        if range_header and range_header.startswith("bytes="):
++            match = re.fullmatch(r"(\d*)-(\d*)", range_header[6:].strip())
++            if match:
++                start_text, end_text = match.groups()
++                if start_text:
++                    start = int(start_text)
++                    end = int(end_text) if end_text else end
++                elif end_text:
++                    start = max(0, size - int(end_text))
++                end = min(end, size - 1)
++                if start > end:
++                    self.send_error(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
++                    return
++                status = HTTPStatus.PARTIAL_CONTENT
++
++        length = end - start + 1
++        self.send_response(status)
++        self.send_header("Content-Type", "video/mp4")
++        self.send_header("Accept-Ranges", "bytes")
++        self.send_header("Cache-Control", "no-store")
++        self.send_header("Content-Length", str(length))
++        if status == HTTPStatus.PARTIAL_CONTENT:
++            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
++        self.end_headers()
++        try:
++            with path.open("rb") as video_file:
++                video_file.seek(start)
++                remaining = length
++                while remaining:
++                    chunk = video_file.read(min(256 * 1024, remaining))
++                    if not chunk:
++                        break
++                    self.wfile.write(chunk)
++                    remaining -= len(chunk)
++        except (BrokenPipeError, ConnectionResetError):
++            pass
++
++    def do_GET(self) -> None:  # noqa: N802
++        if self.path == "/replay.mp4":
++            self._serve_replay_video()
++            return
++        if self.path == "/stream.mjpg":
++            self.send_response(HTTPStatus.OK)
++            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
++            self.send_header("Cache-Control", "no-store")
++            self.end_headers()
++            frame_id = -1
++            try:
++                while not self.state.stop.is_set():
++                    jpeg, frame_id = self.state.wait_for_frame(frame_id)
++                    if not jpeg:
++                        continue
++                    self.wfile.write(b"--frame\r\n")
++                    self.wfile.write(b"Content-Type: image/jpeg\r\n")
++                    self.wfile.write(f"Content-Length: {len(jpeg)}\r\n\r\n".encode("ascii"))
++                    self.wfile.write(jpeg)
++                    self.wfile.write(b"\r\n")
++                    self.wfile.flush()
++            except (BrokenPipeError, ConnectionResetError):
++                pass
++            return
++        if self.path.startswith("/frame.jpg"):
++            jpeg, _ = self.state.snapshot()
++            if not jpeg:
++                self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "frame not ready")
++                return
++            self.send_response(HTTPStatus.OK)
++            self.send_header("Content-Type", "image/jpeg")
++            self.send_header("Cache-Control", "no-store")
++            self.send_header("Content-Length", str(len(jpeg)))
++            self.end_headers()
++            self.wfile.write(jpeg)
++            return
++        if self.path == "/status.json":
++            _, stats = self.state.snapshot()
++            payload = json.dumps(stats, ensure_ascii=False).encode("utf-8")
++            self.send_response(HTTPStatus.OK)
++            self.send_header("Content-Type", "application/json; charset=utf-8")
++            self.send_header("Cache-Control", "no-store")
++            self.send_header("Content-Length", str(len(payload)))
++            self.end_headers()
++            self.wfile.write(payload)
++            return
++        payload = (REPLAY_HTML if self.state.replay_video else LIVE_HTML).encode("utf-8")
++        self.send_response(HTTPStatus.OK)
++        self.send_header("Content-Type", "text/html; charset=utf-8")
++        self.send_header("Content-Length", str(len(payload)))
++        self.end_headers()
++        self.wfile.write(payload)
++
++    def log_message(self, format: str, *args: object) -> None:
++        return
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--run-dir", type=Path, default=None)
++    parser.add_argument("--log-file", type=Path, default=None)
++    parser.add_argument("--host", default="0.0.0.0")
++    parser.add_argument("--port", type=int, default=8080)
++    parser.add_argument("--width", type=int, default=512)
++    parser.add_argument("--height", type=int, default=288)
++    parser.add_argument("--fps", type=int, default=25)
++    parser.add_argument("--replay-title", default="MicroDuck 动作 · 50fps 验收回放")
++    parser.add_argument("--replay-subtitle", default="由 ONNX 策略驱动的 MuJoCo 物理回放。")
++    parser.add_argument("--summary-file", type=Path, default=None,
++                        help="Optional acceptance JSON merged into the replay status panel.")
++    parser.add_argument("--selected-checkpoint", default=None,
++                        help="Checkpoint label used by a replay selected after comparison.")
++    parser.add_argument("--live", action="store_true",
++                        help="Use the lower-frame-rate live checkpoint renderer instead of the accepted MP4.")
++    parser.add_argument(
++        "--replay-video",
++        type=Path,
++        default=ROOT / "artifacts/showcase/roller_crouch_spin_final_50fps.mp4",
++    )
++    args = parser.parse_args()
++
++    run_dir = args.run_dir or newest_run()
++    replay_video = None if args.live else args.replay_video
++    if replay_video is not None and not replay_video.is_file():
++        raise FileNotFoundError(replay_video)
++    state = PreviewState(
++        run_dir,
++        args.log_file,
++        args.width,
++        args.height,
++        replay_video=replay_video,
++    )
++    if replay_video is not None:
++        checkpoint_iteration, checkpoint_name = newest_checkpoint(run_dir)
++        state.stats = {
++            "status": "replay",
++            "run": run_dir.name,
++            "checkpoint_iteration": checkpoint_iteration,
++            "checkpoint": args.selected_checkpoint or checkpoint_name,
++            "playback": replay_video.name,
++            "title": args.replay_title,
++            "subtitle": args.replay_subtitle,
++        }
++        if args.summary_file is not None:
++            summary = json.loads(args.summary_file.read_text(encoding="utf-8"))
++            state.stats.update(summary)
++            state.stats["accepted"] = all(summary.get("checks", {}).values())
++    Handler.state = state
++    worker = None
++    if replay_video is None:
++        worker = threading.Thread(target=build_simulation, args=(state, args.fps), daemon=True)
++        worker.start()
++    server = ThreadingHTTPServer((args.host, args.port), Handler)
++    mode = "live checkpoint renderer" if replay_video is None else f"50 fps replay: {replay_video}"
++    print(f"Training preview: http://localhost:{args.port}/ ({mode})")
++    print(f"Watching run: {run_dir}")
++    try:
++        server.serve_forever()
++    except KeyboardInterrupt:
++        pass
++    finally:
++        state.stop.set()
++        server.server_close()
++        if worker is not None:
++            worker.join(timeout=5.0)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/src/mjlab_microduck/robot/microduck/scene_roller_showcase.xml b/src/mjlab_microduck/robot/microduck/scene_roller_showcase.xml
+new file mode 100644
+index 0000000..9b4a302
+--- /dev/null
++++ b/src/mjlab_microduck/robot/microduck/scene_roller_showcase.xml
+@@ -0,0 +1,71 @@
++<mujoco model="microduck roller showcase">
++    <include file="robot_allcollisions_rollers.xml" />
++
++    <visual>
++        <headlight diffuse="0.65 0.65 0.65" ambient="0.3 0.3 0.3" specular="0.1 0.1 0.1" />
++        <rgba haze="0.84 0.90 0.96 1" />
++        <global azimuth="145" elevation="-18" offwidth="1280" offheight="720" />
++    </visual>
++
++    <asset>
++        <texture type="skybox" builtin="gradient" rgb1="0.76 0.86 0.96" rgb2="0.95 0.97 1.0"
++                 width="512" height="3072" />
++        <texture type="2d" name="showcase_floor" builtin="checker" mark="edge"
++                 rgb1="0.18 0.21 0.25" rgb2="0.24 0.28 0.33" markrgb="0.9 0.62 0.08"
++                 width="300" height="300" />
++        <material name="showcase_floor" texture="showcase_floor" texuniform="true"
++                  texrepeat="18 8" reflectance="0.12" />
++        <material name="gate_yellow" rgba="0.96 0.63 0.08 1" />
++        <material name="marker_white" rgba="0.95 0.97 1.0 1" />
++        <material name="finish_red" rgba="0.90 0.18 0.15 1" />
++        <material name="route_blue" rgba="0.15 0.62 0.92 1" />
++    </asset>
++
++    <worldbody>
++        <light pos="2 -1 3.5" dir="-0.3 0.15 -1" directional="true" />
++        <geom name="floor" size="0 0 0.05" pos="0 0 0" type="plane" material="showcase_floor" />
++
++        <!-- A freestanding visual gate.  The bar height is tuned after rollout
++             metrics so an upright duck cannot clear it but the crouch can. -->
++        <geom name="gate_left" type="box" pos="-0.883 1.102 0.16" size="0.025 0.025 0.16"
++              material="gate_yellow" contype="0" conaffinity="0" />
++        <geom name="gate_right" type="box" pos="-0.283 1.346 0.16" size="0.025 0.025 0.16"
++              material="gate_yellow" contype="0" conaffinity="0" />
++        <geom name="gate_bar" type="box" pos="-0.583 1.224 0.335" size="0.35 0.035 0.025"
++              euler="0 0 22.2" material="gate_yellow" />
++
++        <geom name="spin_marker" type="cylinder" pos="-0.77 2.02 0.002" size="0.24 0.002"
++              material="marker_white" contype="0" conaffinity="0" />
++        <geom name="finish_line" type="box" pos="-0.72 1.90 0.003" size="0.45 0.025 0.003"
++              euler="0 0 20" material="finish_red" contype="0" conaffinity="0" />
++
++        <!-- Non-colliding route marks make the long approach and 90° corner
++             legible in a wide establishing shot. -->
++        <geom name="route_x_1" type="box" pos="-1.55 -0.59 0.002" size="0.18 0.018 0.002"
++              euler="0 0 14" material="route_blue" contype="0" conaffinity="0" />
++        <geom name="route_x_2" type="box" pos="-1.12 -0.49 0.002" size="0.18 0.018 0.002"
++              euler="0 0 14" material="route_blue" contype="0" conaffinity="0" />
++        <geom name="route_x_3" type="box" pos="-0.70 -0.38 0.002" size="0.18 0.018 0.002"
++              euler="0 0 14" material="route_blue" contype="0" conaffinity="0" />
++        <geom name="corner_marker" type="cylinder" pos="-0.18 -0.32 0.002" size="0.14 0.002"
++              material="route_blue" contype="0" conaffinity="0" />
++        <geom name="route_y_1" type="box" pos="-0.20 0.05 0.002" size="0.15 0.018 0.002"
++              euler="0 0 102" material="route_blue" contype="0" conaffinity="0" />
++        <geom name="route_y_2" type="box" pos="-0.27 0.38 0.002" size="0.15 0.018 0.002"
++              euler="0 0 102" material="route_blue" contype="0" conaffinity="0" />
++        <geom name="route_y_3" type="box" pos="-0.34 0.68 0.002" size="0.11 0.018 0.002"
++              euler="0 0 102" material="route_blue" contype="0" conaffinity="0" />
++    </worldbody>
++
++    <keyframe>
++        <key name="STAND" qpos="
++        0 0 0.1385 1 0 0 0
++        0 -0.0872664626 -0.457924 -0.004940 0.452984 0 0
++        0.3490658504 0.3490658504 0 0
++        0 0.0872664626 0.457924 0.004940 -0.452984 0 0"
++        ctrl="
++        0 -0.0872664626 -0.457924 -0.004940 0.452984
++        0.3490658504 0.3490658504 0 0
++        0 0.0872664626 0.457924 0.004940 -0.452984" />
++    </keyframe>
++</mujoco>
+diff --git a/src/mjlab_microduck/showcase.py b/src/mjlab_microduck/showcase.py
+new file mode 100644
+index 0000000..bcb7a11
+--- /dev/null
++++ b/src/mjlab_microduck/showcase.py
+@@ -0,0 +1,85 @@
++"""Deterministic timeline and metrics helpers for the roller showcase.
++
++The showcase deliberately separates choreography from control.  The timeline
++only selects a command/policy; every joint target still comes from an ONNX
++policy, except the final head pose which is a command understood by the roller
++policy itself.
++"""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++
++
++@dataclass(frozen=True)
++class ShowcasePhase:
++    """One segment of the short-form-video choreography."""
++
++    name: str
++    start: float
++    end: float
++    policy: str
++    forward_command: float = 0.0
++    cycle_period: float | None = None
++    action_blend_s: float = 0.0
++    action_mix: float = 1.0
++    head_command: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
++
++    def contains(self, time_s: float) -> bool:
++        return self.start <= time_s < self.end
++
++
++ROLLER_SHOWCASE_TIMELINE = (
++    # Establishing shot: the duck starts far from the obstacle instead of
++    # appearing beside it, then builds speed over a visibly long runway.
++    ShowcasePhase("settle", 0.0, 0.8, "roller"),
++    ShowcasePhase("long_approach", 0.8, 4.8, "roller", forward_command=0.55),
++    # Enter the spin policy while still rolling.  A short action cross-fade and
++    # persistent roller/spin action mixing produce a ~90° carving arc at
++    # ~0.49 m/s entry speed; the roller policy never switches off completely.
++    ShowcasePhase(
++        "carve_turn", 4.8, 5.62, "turn", forward_command=0.55,
++        cycle_period=1.16, action_blend_s=0.08, action_mix=0.82,
++    ),
++    ShowcasePhase("corner_exit", 5.62, 8.62, "roller", forward_command=0.55),
++    # The dynamic crouch policy uses a 5 s clock: 0.6 s down, 1.6 s low,
++    # then a 1.0 s gradual rise.  The gate is crossed before recovery starts.
++    ShowcasePhase(
++        "crouch_gate", 8.62, 12.12, "crouch", cycle_period=5.0, action_blend_s=0.16
++    ),
++    # Keep rolling after the bar so the spin happens in its own readable zone
++    # instead of being hidden behind the obstacle in the replay camera.
++    ShowcasePhase("exit_gate", 12.12, 13.12, "roller", forward_command=0.0),
++    # Exit speed contributes angular impulse when the spin controller engages;
++    # this calibrated clock completes one turn without the 60° overshoot seen
++    # with the standing-start deployment period.
++    ShowcasePhase("spin_360", 13.12, 16.04, "spin", cycle_period=4.15),
++    ShowcasePhase("hard_brake", 16.04, 17.24, "roller"),
++    ShowcasePhase(
++        "head_tilt_finish",
++        17.24,
++        19.48,
++        "roller",
++        head_command=(0.0, -0.07, 0.20, 0.16),
++    ),
++)
++
++
++def phase_at(time_s: float) -> ShowcasePhase:
++    """Return the active phase, clamping past-the-end time to the finale."""
++
++    for phase in ROLLER_SHOWCASE_TIMELINE:
++        if phase.contains(time_s):
++            return phase
++    return ROLLER_SHOWCASE_TIMELINE[-1]
++
++
++def total_duration() -> float:
++    return ROLLER_SHOWCASE_TIMELINE[-1].end
++
++
++def smoothstep01(value: float) -> float:
++    """Clamp ``value`` to [0, 1] and apply a zero-slope cubic easing curve."""
++
++    clamped = min(1.0, max(0.0, value))
++    return clamped * clamped * (3.0 - 2.0 * clamped)
+diff --git a/src/mjlab_microduck/tasks/microduck_roller_crouch_env_cfg.py b/src/mjlab_microduck/tasks/microduck_roller_crouch_env_cfg.py
+index c37507d..df2f585 100644
+--- a/src/mjlab_microduck/tasks/microduck_roller_crouch_env_cfg.py
++++ b/src/mjlab_microduck/tasks/microduck_roller_crouch_env_cfg.py
+@@ -39,18 +39,18 @@ VELOCITY_PUSH_RANGE              = (-0.2, 0.2)
+ IMU_ORIENTATION_RANDOMIZATION_ANGLE = 6.0
+ ENCODER_BIAS_RANGE               = (-0.015, 0.015)
+ 
+-ENTRY_VELOCITY_X   = (0.2, 0.5)  # m/s : le robot arrive en roulant
++ENTRY_VELOCITY_X   = (0.25, 0.40)  # m/s: dynamic gate entry, still inside the roller envelope
+ 
+ # Timing du cycle (phase), 4 segments sur une période de 5 s :
+-#   descente     [0, DESCENT_END]        = 0.10*5 = 0.5 s  (se baisser)
+-#   bas/accroupi [DESCENT_END, HOLD_END] = 0.40*5 = 2.0 s  (glisse accroupie)
+-#   remontée     [HOLD_END, RISE_END]    = 0.10*5 = 0.5 s  (se lever)
+-#   haut/debout  [RISE_END, 1.0]         = 0.40*5 = 2.0 s  (repos debout)
++#   descente     [0, DESCENT_END]        = 0.12*5 = 0.6 s  (se baisser)
++#   bas/accroupi [DESCENT_END, HOLD_END] = 0.32*5 = 1.6 s  (passe sous la barre)
++#   remontée     [HOLD_END, RISE_END]    = 0.20*5 = 1.0 s  (se relever après)
++#   haut/debout  [RISE_END, 1.0]         = 0.36*5 = 1.8 s  (repos debout)
+ # NB: la période DOIT matcher --ground-pick-period au déploiement (5.0).
+ CROUCH_PERIOD = 5.0
+-DESCENT_END   = 0.10
+-HOLD_END      = 0.50
+-RISE_END      = 0.60
++DESCENT_END   = 0.12  # 0.6 s descent
++HOLD_END      = 0.44  # 1.6 s low glide
++RISE_END      = 0.64  # 1.0 s gradual recovery after clearing the bar
+ 
+ # Pose ACCROUPI cible (rad, par NOM d'articulation) — composée dans
+ # scripts/crouch_pose_editor.py. La reward interpole DEBOUT(HOME) <-> cette pose
+@@ -187,8 +187,18 @@ def make_microduck_roller_crouch_env_cfg(play: bool = False) -> ManagerBasedRlEn
+     # Conserver l'élan (ne pas freiner) — indépendant de la commande.
+     cfg.rewards["forward_speed"] = RewardTermCfg(
+         func=microduck_mdp.forward_speed_reward,
+-        weight=1.0,
+-        params={"vel_ref": 0.2},
++        weight=2.0,
++        params={"vel_ref": 0.15},
++    )
++    cfg.rewards["forward_speed_tracking"] = RewardTermCfg(
++        func=microduck_mdp.forward_speed_tracking_reward,
++        weight=6.0,
++        params={"target_speed": 0.30, "std": 0.12},
++    )
++    cfg.rewards["heading_hold"] = RewardTermCfg(
++        func=microduck_mdp.heading_hold_reward,
++        weight=2.0,
++        params={"std": 0.35},
+     )
+     # Léger penché avant pendant l'accroupi -> contre la bascule arrière observée
+     # sur le vrai robot lors de la descente rapide. Gaté par le blend (crouch only).
+@@ -471,8 +481,8 @@ MicroduckRollerCrouchRlCfg = RslRlOnPolicyRunnerCfg(
+         symmetry_cfg=SYMMETRY_CFG if ENABLE_SYMMETRY else None,
+     ),
+     wandb_project="mjlab_microduck",
+-    experiment_name="roller_crouch",
+-    run_name="roller_crouch",
++    experiment_name="roller_crouch_dynamic",
++    run_name="roller_crouch_dynamic",
+     save_interval=250,
+     num_steps_per_env=24,
+     max_iterations=8_000,
+diff --git a/tests/test_roller_crouch_cfg.py b/tests/test_roller_crouch_cfg.py
+index 25a7e86..8680cf9 100644
+--- a/tests/test_roller_crouch_cfg.py
++++ b/tests/test_roller_crouch_cfg.py
+@@ -21,6 +21,9 @@ def test_cfg_has_crouch_and_forward_rewards():
+     assert "crouch_glide_pose" in cfg.rewards
+     assert "crouch_glide_pose_l1" in cfg.rewards
+     assert "forward_speed" in cfg.rewards
++    assert "forward_speed_tracking" in cfg.rewards
++    assert cfg.rewards["forward_speed_tracking"].weight >= 4.0
++    assert "heading_hold" in cfg.rewards
+     # léger penché avant pendant l'accroupi (cible positive = vers l'avant)
+     assert "crouch_forward_lean" in cfg.rewards
+     assert cfg.rewards["crouch_forward_lean"].params["target_pitch"] > 0.0
+@@ -45,4 +48,13 @@ def test_entry_velocity_applied_safely_via_reset_base():
+     vr = cfg.events["reset_base"].params.get("velocity_range")
+     assert vr and "x" in vr
+     lo, hi = vr["x"]
+-    assert lo > 0.0 and hi >= lo
++    assert lo >= 0.25 and hi <= 0.40
++
++
++def test_dynamic_gate_timing_recovers_gradually_after_low_glide():
++    cfg = make_microduck_roller_crouch_env_cfg()
++    pose = cfg.rewards["crouch_glide_pose"].params
++    period = cfg.commands["twist"].period
++    assert pose["descent_end"] * period == 0.6
++    assert (pose["hold_end"] - pose["descent_end"]) * period == 1.6
++    assert (pose["rise_end"] - pose["hold_end"]) * period == 1.0
+diff --git a/tests/test_showcase_timeline.py b/tests/test_showcase_timeline.py
+new file mode 100644
+index 0000000..c6e7ca3
+--- /dev/null
++++ b/tests/test_showcase_timeline.py
+@@ -0,0 +1,45 @@
++from mjlab_microduck.showcase import phase_at, smoothstep01, total_duration
++
++
++def test_showcase_timeline_has_no_boundary_gaps():
++    expected = (
++        (0.0, "settle"),
++        (0.8, "long_approach"),
++        (4.8, "carve_turn"),
++        (5.62, "corner_exit"),
++        (8.62, "crouch_gate"),
++        (12.12, "exit_gate"),
++        (13.12, "spin_360"),
++        (16.04, "hard_brake"),
++        (17.24, "head_tilt_finish"),
++        (19.48, "head_tilt_finish"),
++    )
++    assert tuple((time_s, phase_at(time_s).name) for time_s, _ in expected) == expected
++
++
++def test_showcase_duration_supports_a_readable_long_route():
++    assert total_duration() == 19.48
++
++
++def test_corner_turn_uses_calibrated_compressed_spin_cycle():
++    turn = phase_at(5.0)
++    assert turn.policy == "turn"
++    assert turn.cycle_period == 1.16
++    assert turn.action_blend_s == 0.08
++    assert turn.action_mix == 0.82
++
++
++def test_crouch_uses_the_period_seen_during_training():
++    crouch = phase_at(9.0)
++    assert crouch.policy == "crouch"
++    assert crouch.cycle_period == 5.0
++
++
++def test_smoothstep_clamps_and_eases_without_endpoint_velocity():
++    assert smoothstep01(-1.0) == 0.0
++    assert smoothstep01(0.0) == 0.0
++    assert smoothstep01(0.5) == 0.5
++    assert smoothstep01(1.0) == 1.0
++    assert smoothstep01(2.0) == 1.0
++    assert smoothstep01(0.1) < 0.1
++    assert smoothstep01(0.9) > 0.9
