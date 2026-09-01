@@ -66,7 +66,7 @@ V0.4 的关键变化是 **No Hardware, No Done**：仿真、mock 和视频可以
 | 官方 Microduck 14DOF 长训练 | ✅ 已完成 | 4,096 env，103.1M step，GPU 平均/峰值 57.94%/88% |
 | 固定直行量化评估 | ✅ 已通过 | `model_1000.pt`，128/128 不摔，0 NaN |
 | “醉鸭拳”传播动作 | ✅ 已通过仿真验收 | 4,096 env，98.3M step；左右醉步、马步、探头出招、回撤和歪头收势；50 fps 策略回放 |
-| 长路线轮滑障碍秀 | ✅ 已通过仿真验收 | 22 s 一镜到底；2.01 m 远端加速、94.8° 转弯、下蹲穿杆、368.5° 旋转、急停歪头；50 fps 回放 |
+| 连续轮滑障碍秀 | ✅ 已通过仿真验收 | 19.64 s 一镜到底；0.337 m/s 带速甩弯、92.2° 弧线转向、0.483 m/s 以上低头穿杆、出杆渐起、341.1° 旋转与急停歪头；50 fps 回放 |
 | V0.4 HardwareManifest | ✅ 已实现 | 10DOF joint order、C044/C046、BNO085、TBD_MEASURE |
 | H1 qualification logger | ✅ mock 可运行 | 50 Hz、CSV/JSON；mock 只能产生 `SIM_PASS` |
 | ServoBus / ImuBackend | ✅ 基础完成 | mock、BNO085、BNO055 compatibility；真实 STS3215 backend 待硬件 |
@@ -74,7 +74,7 @@ V0.4 的关键变化是 **No Hardware, No Done**：仿真、mock 和视频可以
 | 自有 10DOF RL 策略 | ⏳ 未完成 | 官方 14DOF policy 不能下发给目标硬件 |
 | 真实舵机/单腿/全身 | ⏳ 未接入 | 等 H1 实物资格测试，不冒充 HIL/REAL |
 
-正式训练证据见 [`2026-08-31-upstream-walk-training.md`](docs/experiments/2026-08-31-upstream-walk-training.md)；传播动作的设计、训练与检查点对比见 [`2026-09-01-drunken-boxing-training.md`](docs/experiments/2026-09-01-drunken-boxing-training.md)；长路线轮滑编排与逐项验收见 [`2026-09-01-roller-obstacle-showcase.md`](docs/experiments/2026-09-01-roller-obstacle-showcase.md)。这些结果证明训练链路能用，不代表 10DOF 真机已经会走或会做同样动作。
+正式训练证据见 [`2026-08-31-upstream-walk-training.md`](docs/experiments/2026-08-31-upstream-walk-training.md)；传播动作的设计、训练与检查点对比见 [`2026-09-01-drunken-boxing-training.md`](docs/experiments/2026-09-01-drunken-boxing-training.md)；带速甩弯、动态低头穿杆训练与逐项验收见 [`2026-09-01-roller-obstacle-showcase.md`](docs/experiments/2026-09-01-roller-obstacle-showcase.md)。这些结果证明训练链路能用，不代表 10DOF 真机已经会走或会做同样动作。
 
 ## 强化学习是在 WSL2 里训练的吗
 
