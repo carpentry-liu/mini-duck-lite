@@ -1,6 +1,6 @@
 # 当前进度
 
-更新时间：2026-08-31
+更新时间：2026-09-01
 
 ## 当前 Gate
 
@@ -12,6 +12,7 @@ V0.4 已将项目切换为 Hardware-First。官方 Microduck 14DOF 的 103.1M st
 
 - WSL2 Ubuntu 24.04.3、Python 3.12.3、uv 0.11.7、RTX 5060 Ti 16 GB 训练链路通过；
 - 官方 14DOF `model_1000.pt` 在 128 环境固定直行 10 秒时 128/128 不摔、0 NaN；
+- 官方 roller/crouch 与本机 spin 策略已编排为 22 秒长路线：远端加速、转弯、下蹲穿杆、旋转、急停歪头，完整物理验收通过；
 - V0.4 产品范围、Hardware-First Gate、真实部署链和工程边界已写入仓库；
 - `HardwareManifest` 已固定 10DOF joint order、C044/C046 完整 SKU、BNO085-first 与 `TBD_MEASURE` 字段；
 - H1 actuator qualification plan、mock bus、CSV/JSON logger 已实现；
