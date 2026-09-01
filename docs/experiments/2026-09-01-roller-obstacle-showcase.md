@@ -23,7 +23,9 @@
 - `spin_model_500.onnx`：经相位压缩后负责弧线转向和原地旋转；
 - `dynamic_crouch_model_400.onnx`：本轮新训练的动态低头穿杆策略。
 
-转弯先用 `scripts/calibrate_spin_turn.py` 扫描相位周期和策略输出混合时间。最终控制器以 0.337 m/s 入弯，在 28.1 cm 的实际轨迹中完成 92.2° 转向；它不是停稳后的原地 pivot。
+转弯先用 `scripts/calibrate_spin_turn.py` 扫描相位周期、混合时间和策略占比。最终控制器持续混合 roller 与 spin 两个策略：以 0.535 m/s 入弯，弯中不低于 0.258 m/s，在 34.8 cm 的实际轨迹中完成 92.6° 转向；它不是停稳后的原地 pivot。
+
+横杆不再按预设赛道角度摆放。脚本先运行无碰撞探测路线，从完全下蹲时的实测轨迹反算穿越点与运动切线，再把横杆中心放到 `(-0.583, 1.224)`，并旋转到与该切线垂直的 `22.2°`。最终验收重新启用横杆碰撞。
 
 动态下蹲使用 PPO 在 WSL2 Ubuntu、RTX 5060 Ti 上训练：
 
@@ -49,9 +51,9 @@ branch: experiment/roller-showcase
 MUJOCO_GL=egl uv run python scripts/run_roller_showcase.py \
   --crouch policies/trained/dynamic_crouch_model_400.onnx \
   --spin policies/trained/spin_model_500.onnx \
-  --video artifacts/showcase/roller_dynamic_gate_final_50fps.mp4 \
-  --metrics artifacts/showcase/roller_dynamic_gate_final_metrics.csv \
-  --summary artifacts/showcase/roller_dynamic_gate_final_summary.json \
+  --video artifacts/showcase/roller_fast_carve_gate_final_50fps.mp4 \
+  --metrics artifacts/showcase/roller_fast_carve_gate_final_metrics.csv \
+  --summary artifacts/showcase/roller_fast_carve_gate_final_summary.json \
   --fps 50 --width 1280 --height 720
 ```
 
@@ -59,19 +61,19 @@ MUJOCO_GL=egl uv run python scripts/run_roller_showcase.py \
 
 | 指标 | 结果 | 判定 |
 |---|---:|---|
-| 视频规格 | 1280×720，50 fps，19.64 s | 通过 |
-| 完整路径长度 | 4.520 m | 通过 |
-| 入弯速度 | 0.337 m/s | 通过 |
-| 转弯弧线长度 | 0.281 m | 通过 |
-| 连续转弯角度 | 92.2° | 通过 |
-| 横杆交叉速度 | 0.514 m/s | 通过 |
-| 横杆窗口最低速度 | 0.483 m/s | 通过，未在杆下停车 |
-| 穿杆时躯干 / 嘴尖高度 | 8.0 cm / 16.5 cm | 通过 |
-| 穿杆时低头角 | 0.701 rad（40.2°） | 通过 |
-| 下蹲阶段滑行距离 | 1.415 m | 通过 |
+| 视频规格 | 1280×720，50 fps，19.48 s | 通过 |
+| 完整路径长度 | 4.631 m | 通过 |
+| 入弯 / 弯中最低速度 | 0.535 / 0.258 m/s | 通过 |
+| 转弯弧线长度 | 0.348 m | 通过 |
+| 连续转弯角度 | 92.6° | 通过 |
+| 横杆交叉速度 | 0.390 m/s | 通过 |
+| 横杆窗口最低速度 | 0.344 m/s | 通过，未在杆下停车 |
+| 穿杆时躯干 / 嘴尖高度 | 7.2 cm / 16.1 cm | 通过 |
+| 穿杆时低头角 | 0.856 rad（49.0°） | 通过 |
+| 下蹲阶段滑行距离 | 1.290 m | 通过 |
 | 完全离杆后才恢复站姿 | 是 | 通过 |
-| 旋转角度 | 341.1° | 通过 |
-| 旋转区域内漂移 | 8.8 cm | 通过 |
+| 旋转角度 | 344.8° | 通过 |
+| 旋转区域内漂移 | 6.8 cm | 通过 |
 | 最终平面速度 | 0.0002 m/s | 通过 |
 
 最终回放、逐控制步 CSV 和 JSON 摘要保存在外置工作树的 `artifacts/showcase/`。大文件不提交到 Git；脚本、训练任务、场景和复现命令进入版本控制。

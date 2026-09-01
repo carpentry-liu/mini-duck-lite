@@ -66,7 +66,7 @@ V0.4 的关键变化是 **No Hardware, No Done**：仿真、mock 和视频可以
 | 官方 Microduck 14DOF 长训练 | ✅ 已完成 | 4,096 env，103.1M step，GPU 平均/峰值 57.94%/88% |
 | 固定直行量化评估 | ✅ 已通过 | `model_1000.pt`，128/128 不摔，0 NaN |
 | “醉鸭拳”传播动作 | ✅ 已通过仿真验收 | 4,096 env，98.3M step；左右醉步、马步、探头出招、回撤和歪头收势；50 fps 策略回放 |
-| 连续轮滑障碍秀 | ✅ 已通过仿真验收 | 19.64 s 一镜到底；0.337 m/s 带速甩弯、92.2° 弧线转向、0.483 m/s 以上低头穿杆、出杆渐起、341.1° 旋转与急停歪头；50 fps 回放 |
+| 连续轮滑障碍秀 | ✅ 已通过仿真验收 | 19.48 s 一镜到底；0.535 m/s 带速入弯、弯中不低于 0.258 m/s、92.6° 弧线转向、动态低头穿杆、出杆渐起与 344.8° 旋转；50 fps 回放 |
 | V0.4 HardwareManifest | ✅ 已实现 | 10DOF joint order、C044/C046、BNO085、TBD_MEASURE |
 | H1 qualification logger | ✅ mock 可运行 | 50 Hz、CSV/JSON；mock 只能产生 `SIM_PASS` |
 | ServoBus / ImuBackend | ✅ 基础完成 | mock、BNO085、BNO055 compatibility；真实 STS3215 backend 待硬件 |
