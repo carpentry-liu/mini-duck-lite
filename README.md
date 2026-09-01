@@ -4,6 +4,14 @@
 
 当前版本：**V0.4 Hardware-First** ｜ 当前 Gate：**H1 Hardware Qualification** ｜ H0 上游仿真基线：**已通过**
 
+## 轮滑障碍实验 · Physical AI 实战 01
+
+[![Mini Duck 连续轮滑障碍实验：加速、甩弯、动态低头穿杆、旋转与急停](training/releases/roller-fast-carve-v1/evidence/roller_fast_carve_gate_final_contact_sheet.jpg)](training/releases/roller-fast-carve-v1/evidence/roller_fast_carve_gate_final_50fps.mp4)
+
+在 4,096 个并行环境中训练并组合三个 50 Hz ONNX 策略，完成 19.48 秒连续物理仿真：远距离加速、带速甩弯、边滑边低头穿杆、出杆渐起、344.8° 旋转和急停歪头。证据等级为 **SIM**。
+
+[播放完整视频](training/releases/roller-fast-carve-v1/evidence/roller_fast_carve_gate_final_50fps.mp4) ｜ [阅读技术实验报告](https://carpentry-liu.github.io/blog/physical-ai-01-training-evidence.html) ｜ [查看权重、日志与量化数据](training/releases/roller-fast-carve-v1/README.md)
+
 ## 基于 Microduck，但不止于复刻
 
 Microduck 证明了小型双足机器人可以在 MuJoCo 中训练策略、导出 ONNX，并以 50 Hz 在端侧闭环运行。本项目先复现这条公开的软件与强化学习链路，再面向个人开发者补齐一条更容易验证、修改和继续扩展的工程路径。
