@@ -1,12 +1,24 @@
 # Roller Fast Carve Gate · 可复现训练发布包
 
-这是 2026-09-01 完成的 Microduck **连续轮滑障碍秀 v1.0.0**。目标不是做一段关键帧动画，而是在连续物理仿真中组合三个 50 Hz ONNX 策略，完成：
+这是 2026-09-01 完成、2026-09-02 增补物理遥测的 Microduck **连续轮滑障碍秀 v1.1.0**。目标不是做一段关键帧动画，而是在连续物理仿真中组合三个 50 Hz ONNX 策略，完成：
 
 > 远距离加速 → 带速甩弯 → 边滑边低头穿杆 → 出杆渐起 → 360° 旋转 → 急停歪头
 
 ![四阶段真实仿真截图](evidence/roller_fast_carve_gate_final_contact_sheet.jpg)
 
-[下载 1280×720 / 50 fps 最终回放](evidence/roller_fast_carve_gate_final_50fps.mp4)
+[下载 1280×720 / 50 fps 纯净回放](evidence/roller_fast_carve_gate_final_50fps.mp4) ｜ [下载 1920×1080 / 50 fps 物理分析回放](evidence/roller_fast_carve_physics_overlay_50fps.mp4)
+
+[![物理分析回放：关节六维力、扭矩、接触力和摩擦场](evidence/roller_fast_carve_physics_preview.jpg)](evidence/roller_fast_carve_physics_overlay_50fps.mp4)
+
+物理分析版在同一条确定性路线中显示 9 个代表性关节的位移、速度、姿态、驱动力矩、惯性力矩、约束力矩和六维传递力/力矩，并叠加接触力箭头、接触热力图、红—蓝摩擦力场与扭矩涡旋。原始量来自 MuJoCo；连续摩擦场和涡旋明确标为 `DERIVED`，不冒充仿真直接输出的连续场或真机传感器读数。
+
+点击关节查看六维曲线的离线页面位于 [`evidence/physics-viewer/index.html`](evidence/physics-viewer/index.html)。在仓库根目录运行：
+
+```bash
+python -m http.server 8082 --directory training/releases/roller-fast-carve-v1/evidence
+```
+
+然后打开 `http://localhost:8082/physics-viewer/`。MP4 自身不能点击，因此视频每 2.5 秒自动轮播一个代表性关节。
 
 ## 结果
 
@@ -23,7 +35,7 @@
 | 旋转 / 区域漂移 | 344.8° / 0.068 m |
 | 最终平面速度 | 0.0002 m/s |
 
-逐控制步数据见 [`evidence/roller_fast_carve_gate_final_metrics.csv`](evidence/roller_fast_carve_gate_final_metrics.csv)，机器可读验收结果见 [`evidence/roller_fast_carve_gate_final_summary.json`](evidence/roller_fast_carve_gate_final_summary.json)。
+逐控制步路线数据见 [`evidence/roller_fast_carve_gate_final_metrics.csv`](evidence/roller_fast_carve_gate_final_metrics.csv)，机器可读验收结果见 [`evidence/roller_fast_carve_gate_final_summary.json`](evidence/roller_fast_carve_gate_final_summary.json)。物理分析的扁平表和含接触列表的完整数据分别见 [`roller_fast_carve_physics_telemetry.csv`](evidence/roller_fast_carve_physics_telemetry.csv) 与 [`roller_fast_carve_physics_telemetry.json`](evidence/roller_fast_carve_physics_telemetry.json)：974 个控制步、9 个代表性关节，数值均通过有限性检查。
 
 ## 发布了什么
 
@@ -31,8 +43,8 @@
 |---|---|---|
 | `weights/` | 两组本机 PPO checkpoint、对应 ONNX，以及上游 roller ONNX | 继续训练、评估和 50 Hz 回放 |
 | `logs/` | 终端全量日志、TensorBoard event | 查看 reward、termination、吞吐和学习过程 |
-| `source-patches/` | 相对上游固定 commit 的两个干净补丁 | 复现环境、reward、场景、控制器和测试 |
-| `evidence/` | 最终 MP4、截图、CSV、JSON | 人眼检查与自动验收 |
+| `source-patches/` | 相对上游固定 commit 的三个干净补丁 | 复现环境、reward、场景、控制器、物理遥测和测试 |
+| `evidence/` | 纯净/分析 MP4、交互回放页、截图、CSV、JSON | 人眼检查、关节诊断与自动验收 |
 | `MANIFEST.json` | 版本、环境、来源、SHA-256 与字节数 | 防止下载或 LFS 文件损坏 |
 
 三个策略的来源必须分开理解：
@@ -51,7 +63,8 @@
 - physics step `0.005 s`，policy/control step `0.02 s`（50 Hz）；
 - 上游仓库：[pollen-robotics/microduck_rl](https://github.com/pollen-robotics/microduck_rl)；
 - 补丁基线：`d424a0c899f6b33cbd3daeb279913134349c0b63`；
-- 本地实验 commit：`98701254cd78e3d197dd8e2a0366b61cdf121073`。
+- 路线实验 commit：`98701254cd78e3d197dd8e2a0366b61cdf121073`；
+- 物理遥测 commit：`212997d35e37ff1f216710b1d9f0b35eca5964a4`。
 
 ## 从上游复现源码
 
@@ -61,11 +74,12 @@ cd microduck_rl
 git checkout d424a0c899f6b33cbd3daeb279913134349c0b63
 git apply /path/to/0001-add-forward-speed-tracking-reward.patch
 git apply /path/to/0002-add-continuous-roller-showcase.patch
+git apply /path/to/0003-feat-showcase-add-physics-telemetry-overlays.patch
 uv sync
-uv run pytest tests/test_roller_crouch_cfg.py tests/test_showcase_timeline.py
+uv run --with pytest pytest tests/test_roller_crouch_cfg.py tests/test_showcase_timeline.py tests/test_physics_overlay.py
 ```
 
-这两个补丁已在一份新的、固定到上述 commit 的 worktree 中顺序执行 `git apply --check` 和完整应用验证。它们刻意不包含同一实验分支中的其他传播动作，便于上游审查。
+前三个补丁已在固定到上述 commit 的独立 worktree 中按顺序构建。它们刻意不包含同一实验分支中的其他传播动作，便于上游审查。
 
 ## 训练与查看曲线
 
@@ -111,6 +125,23 @@ MUJOCO_GL=egl uv run python scripts/run_roller_showcase.py \
   --summary roller_fast_carve_gate_final_summary.json \
   --fps 50 --width 1280 --height 720
 ```
+
+生成物理分析视频、原始遥测和交互回放页：
+
+```bash
+MUJOCO_GL=egl uv run python scripts/run_roller_showcase.py \
+  --roller /path/to/weights/upstream_roller.onnx \
+  --crouch /path/to/weights/dynamic_crouch_model_400.onnx \
+  --spin /path/to/weights/spin_model_500.onnx \
+  --no-video \
+  --analysis-video roller_fast_carve_physics_overlay_50fps.mp4 \
+  --physics-json roller_fast_carve_physics_telemetry.json \
+  --physics-csv roller_fast_carve_physics_telemetry.csv \
+  --viewer-dir physics-viewer \
+  --fps 50 --width 1280 --height 720
+```
+
+分析回放仍是 **SIM**。`cfrc_int` 是 `mj_rnePostConstraint` 后得到的刚体空间传递力；惯性力矩来自 `M(q)qacc`，驱动力矩来自 `qfrc_actuator`，接触六维力来自 `mj_contactForce`。详细口径见 [`docs/experiments/2026-09-02-roller-physics-visualization.md`](../../../docs/experiments/2026-09-02-roller-physics-visualization.md)。
 
 验证下载内容：
 

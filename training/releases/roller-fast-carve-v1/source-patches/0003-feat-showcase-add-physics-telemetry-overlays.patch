@@ -1,0 +1,882 @@
+From 212997d35e37ff1f216710b1d9f0b35eca5964a4 Mon Sep 17 00:00:00 2001
+From: liuzhiwei <1372198470@qq.com>
+Date: Wed, 2 Sep 2026 18:35:43 +0800
+Subject: [PATCH 3/3] feat(showcase): add physics telemetry overlays
+
+---
+ scripts/physics_overlay.py     | 672 +++++++++++++++++++++++++++++++++
+ scripts/run_roller_showcase.py |  84 ++++-
+ tests/test_physics_overlay.py  |  30 ++
+ 3 files changed, 782 insertions(+), 4 deletions(-)
+ create mode 100644 scripts/physics_overlay.py
+ create mode 100644 tests/test_physics_overlay.py
+
+diff --git a/scripts/physics_overlay.py b/scripts/physics_overlay.py
+new file mode 100644
+index 0000000..83ab4a5
+--- /dev/null
++++ b/scripts/physics_overlay.py
+@@ -0,0 +1,672 @@
++#!/usr/bin/env python3
++"""Physics telemetry and visual overlays for deterministic MuJoCo replays."""
++
++from __future__ import annotations
++
++import csv
++import json
++import math
++from pathlib import Path
++from typing import Any
++
++import imageio.v2 as imageio
++import mujoco
++import numpy as np
++from PIL import Image, ImageDraw, ImageFont
++
++
++PREFERRED_JOINTS = (
++    "head_pitch",
++    "left_hip_pitch",
++    "left_knee",
++    "left_ankle",
++    "right_hip_pitch",
++    "right_knee",
++    "right_ankle",
++    "passive_LF_wheel",
++    "passive_RF_wheel",
++)
++
++FORCE_COLORS = ((86, 192, 255), (68, 231, 166), (255, 111, 145))
++TORQUE_COLORS = ((255, 185, 75), (179, 125, 255), (255, 91, 74))
++BG = (7, 15, 27)
++PANEL = (13, 26, 43)
++GRID = (43, 61, 80)
++TEXT = (226, 235, 244)
++MUTED = (135, 154, 175)
++ACCENT = (255, 174, 69)
++
++
++def log_arrow_length(magnitude: float, reference: float = 1.0) -> float:
++    """Map a physical magnitude to a readable, bounded scene arrow length."""
++    return float(np.clip(0.025 + 0.055 * math.log1p(max(0.0, magnitude) / reference), 0.025, 0.24))
++
++
++def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
++    candidates = (
++        Path("/mnt/c/Windows/Fonts/msyhbd.ttc" if bold else "/mnt/c/Windows/Fonts/msyh.ttc"),
++        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
++    )
++    for candidate in candidates:
++        if candidate.is_file():
++            return ImageFont.truetype(str(candidate), size=size)
++    return ImageFont.load_default()
++
++
++def _quat_to_rpy_deg(quat: np.ndarray) -> list[float]:
++    qw, qx, qy, qz = (float(value) for value in quat)
++    sinr_cosp = 2.0 * (qw * qx + qy * qz)
++    cosr_cosp = 1.0 - 2.0 * (qx * qx + qy * qy)
++    roll = math.atan2(sinr_cosp, cosr_cosp)
++    sinp = 2.0 * (qw * qy - qz * qx)
++    pitch = math.copysign(math.pi / 2.0, sinp) if abs(sinp) >= 1.0 else math.asin(sinp)
++    siny_cosp = 2.0 * (qw * qz + qx * qy)
++    cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
++    yaw = math.atan2(siny_cosp, cosy_cosp)
++    return [math.degrees(roll), math.degrees(pitch), math.degrees(yaw)]
++
++
++def _name(model: mujoco.MjModel, obj_type: mujoco.mjtObj, obj_id: int) -> str:
++    value = mujoco.mj_id2name(model, obj_type, obj_id)
++    return value or f"unnamed_{obj_id}"
++
++
++def select_representative_joints(model: mujoco.MjModel) -> list[str]:
++    available = {
++        _name(model, mujoco.mjtObj.mjOBJ_JOINT, joint_id)
++        for joint_id in range(model.njnt)
++        if int(model.jnt_type[joint_id]) == int(mujoco.mjtJoint.mjJNT_HINGE)
++    }
++    selected = [joint for joint in PREFERRED_JOINTS if joint in available]
++    if len(selected) < 6:
++        selected.extend(sorted(available - set(selected))[: 9 - len(selected)])
++    return selected[:9]
++
++
++class PhysicsRecorder:
++    """Collects raw per-control-step joint and contact values."""
++
++    def __init__(self, model: mujoco.MjModel, data: mujoco.MjData, control_hz: float):
++        self.model = model
++        self.data = data
++        self.control_hz = control_hz
++        self.joint_names = select_representative_joints(model)
++        self.joints: dict[str, dict[str, int]] = {}
++        self.reference_qpos = data.qpos.copy()
++        for joint_name in self.joint_names:
++            joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
++            self.joints[joint_name] = {
++                "joint_id": joint_id,
++                "qpos": int(model.jnt_qposadr[joint_id]),
++                "dof": int(model.jnt_dofadr[joint_id]),
++                "body": int(model.jnt_bodyid[joint_id]),
++            }
++        self.records: list[dict[str, Any]] = []
++
++    def capture(self, time_s: float, phase: str) -> dict[str, Any]:
++        mujoco.mj_rnePostConstraint(self.model, self.data)
++        inertia = np.zeros(self.model.nv, dtype=np.float64)
++        mujoco.mj_mulM(self.model, self.data, inertia, self.data.qacc)
++
++        root_joint = mujoco.mj_name2id(
++            self.model, mujoco.mjtObj.mjOBJ_JOINT, "trunk_base_freejoint"
++        )
++        root_qpos = int(self.model.jnt_qposadr[root_joint])
++        root_quat = self.data.qpos[root_qpos + 3:root_qpos + 7]
++        base_rpy = _quat_to_rpy_deg(root_quat)
++        yaw = math.radians(base_rpy[2])
++        base_forward = np.asarray((math.cos(yaw), math.sin(yaw), 0.0))
++
++        contacts: list[dict[str, Any]] = []
++        total_normal = 0.0
++        total_friction = 0.0
++        for contact_index in range(self.data.ncon):
++            contact = self.data.contact[contact_index]
++            wrench_local = np.zeros(6, dtype=np.float64)
++            mujoco.mj_contactForce(self.model, self.data, contact_index, wrench_local)
++            frame = np.asarray(contact.frame, dtype=np.float64).reshape(3, 3)
++            force_world = frame.T @ wrench_local[:3]
++            torque_world = frame.T @ wrench_local[3:]
++            tangent_world = frame[1] * wrench_local[1] + frame[2] * wrench_local[2]
++            normal_force = abs(float(wrench_local[0]))
++            tangent_force = float(np.linalg.norm(wrench_local[1:3]))
++            total_normal += normal_force
++            total_friction += tangent_force
++            contacts.append(
++                {
++                    "index": contact_index,
++                    "position_m": [float(value) for value in contact.pos],
++                    "normal_force_n": normal_force,
++                    "friction_force_n": tangent_force,
++                    "friction_signed_n": float(tangent_world @ base_forward),
++                    "force_world_n": [float(value) for value in force_world],
++                    "torque_world_nm": [float(value) for value in torque_world],
++                    "tangent_world_n": [float(value) for value in tangent_world],
++                    "geom1": _name(
++                        self.model, mujoco.mjtObj.mjOBJ_GEOM, int(contact.geom1)
++                    ),
++                    "geom2": _name(
++                        self.model, mujoco.mjtObj.mjOBJ_GEOM, int(contact.geom2)
++                    ),
++                }
++            )
++
++        joint_values: dict[str, dict[str, Any]] = {}
++        for joint_name, spec in self.joints.items():
++            qpos_index = spec["qpos"]
++            dof_index = spec["dof"]
++            body_id = spec["body"]
++            transmitted = np.asarray(self.data.cfrc_int[body_id], dtype=np.float64)
++            joint_values[joint_name] = {
++                "position_rad": float(self.data.qpos[qpos_index]),
++                "displacement_rad": float(
++                    self.data.qpos[qpos_index] - self.reference_qpos[qpos_index]
++                ),
++                "velocity_radps": float(self.data.qvel[dof_index]),
++                "drive_torque_nm": float(self.data.qfrc_actuator[dof_index]),
++                "inertia_torque_nm": float(inertia[dof_index]),
++                "constraint_torque_nm": float(self.data.qfrc_constraint[dof_index]),
++                "force_n": [float(value) for value in transmitted[3:6]],
++                "torque_nm": [float(value) for value in transmitted[:3]],
++                "body_rpy_deg": _quat_to_rpy_deg(self.data.xquat[body_id]),
++                "anchor_m": [float(value) for value in self.data.xanchor[spec["joint_id"]]],
++                "axis_world": [float(value) for value in self.data.xaxis[spec["joint_id"]]],
++            }
++
++        record = {
++            "time_s": float(time_s),
++            "phase": phase,
++            "base_position_m": [float(value) for value in self.data.qpos[root_qpos:root_qpos + 3]],
++            "base_rpy_deg": base_rpy,
++            "total_normal_force_n": total_normal,
++            "total_friction_force_n": total_friction,
++            "contacts": contacts,
++            "joints": joint_values,
++        }
++        self.records.append(record)
++        return record
++
++    def write(self, json_path: Path, csv_path: Path) -> None:
++        json_path.parent.mkdir(parents=True, exist_ok=True)
++        csv_path.parent.mkdir(parents=True, exist_ok=True)
++        payload = {
++            "schema_version": "1.0.0",
++            "evidence_level": "SIM",
++            "control_hz": self.control_hz,
++            "joint_names": self.joint_names,
++            "spatial_wrench_order": ["Tx", "Ty", "Tz", "Fx", "Fy", "Fz"],
++            "field_notes": {
++                "friction_field": "DERIVED Gaussian interpolation of discrete contact tangential forces",
++                "torque_vortex": "DERIVED glyph from signed joint torque; not a continuum field",
++                "force_arrow": "Direction is physical; displayed length uses log1p scaling",
++            },
++            "records": self.records,
++        }
++        json_path.write_text(
++            json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
++            encoding="utf-8",
++        )
++
++        rows: list[dict[str, Any]] = []
++        for record in self.records:
++            row: dict[str, Any] = {
++                "time_s": record["time_s"],
++                "phase": record["phase"],
++                "total_normal_force_n": record["total_normal_force_n"],
++                "total_friction_force_n": record["total_friction_force_n"],
++                "contact_count": len(record["contacts"]),
++            }
++            for joint_name in self.joint_names:
++                values = record["joints"][joint_name]
++                prefix = f"joint.{joint_name}."
++                for key in (
++                    "position_rad",
++                    "displacement_rad",
++                    "velocity_radps",
++                    "drive_torque_nm",
++                    "inertia_torque_nm",
++                    "constraint_torque_nm",
++                ):
++                    row[prefix + key] = values[key]
++                for axis, value in zip(("fx_n", "fy_n", "fz_n"), values["force_n"]):
++                    row[prefix + axis] = value
++                for axis, value in zip(("tx_nm", "ty_nm", "tz_nm"), values["torque_nm"]):
++                    row[prefix + axis] = value
++                for axis, value in zip(("roll_deg", "pitch_deg", "yaw_deg"), values["body_rpy_deg"]):
++                    row[prefix + axis] = value
++            rows.append(row)
++        with csv_path.open("w", encoding="utf-8", newline="") as file:
++            writer = csv.DictWriter(file, fieldnames=list(rows[0].keys()))
++            writer.writeheader()
++            writer.writerows(rows)
++
++
++def _add_geom(
++    scene: mujoco.MjvScene,
++    geom_type: mujoco.mjtGeom,
++    size: np.ndarray,
++    position: np.ndarray,
++    rgba: tuple[float, float, float, float],
++) -> None:
++    if scene.ngeom >= scene.maxgeom:
++        return
++    geom = scene.geoms[scene.ngeom]
++    mujoco.mjv_initGeom(
++        geom,
++        int(geom_type),
++        np.asarray(size, dtype=np.float64),
++        np.asarray(position, dtype=np.float64),
++        np.eye(3, dtype=np.float64).reshape(-1),
++        np.asarray(rgba, dtype=np.float32),
++    )
++    scene.ngeom += 1
++
++
++def _add_connector(
++    scene: mujoco.MjvScene,
++    geom_type: mujoco.mjtGeom,
++    start: np.ndarray,
++    end: np.ndarray,
++    width: float,
++    rgba: tuple[float, float, float, float],
++) -> None:
++    if scene.ngeom >= scene.maxgeom:
++        return
++    geom = scene.geoms[scene.ngeom]
++    mujoco.mjv_initGeom(
++        geom,
++        int(geom_type),
++        np.zeros(3, dtype=np.float64),
++        np.zeros(3, dtype=np.float64),
++        np.eye(3, dtype=np.float64).reshape(-1),
++        np.asarray(rgba, dtype=np.float32),
++    )
++    mujoco.mjv_connector(
++        geom,
++        int(geom_type),
++        width,
++        np.asarray(start, dtype=np.float64),
++        np.asarray(end, dtype=np.float64),
++    )
++    scene.ngeom += 1
++
++
++def _orthogonal_basis(axis: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
++    axis = axis / max(float(np.linalg.norm(axis)), 1e-9)
++    helper = np.asarray((0.0, 0.0, 1.0))
++    if abs(float(axis @ helper)) > 0.9:
++        helper = np.asarray((1.0, 0.0, 0.0))
++    first = np.cross(axis, helper)
++    first /= max(float(np.linalg.norm(first)), 1e-9)
++    second = np.cross(axis, first)
++    return first, second
++
++
++def add_scene_overlays(
++    scene: mujoco.MjvScene,
++    model: mujoco.MjModel,
++    data: mujoco.MjData,
++    record: dict[str, Any],
++    selected_joint: str,
++) -> None:
++    """Add true contact vectors plus explicitly derived spatial glyphs."""
++    contacts = record["contacts"]
++    base_position = np.asarray(record["base_position_m"])
++    yaw = math.radians(float(record["base_rpy_deg"][2]))
++    base_forward = np.asarray((math.cos(yaw), math.sin(yaw), 0.0))
++
++    # DERIVED friction field: signed Gaussian samples on the ground plane.
++    field_points: list[tuple[np.ndarray, float]] = []
++    for local_x in np.linspace(-0.26, 0.26, 7):
++        for local_y in np.linspace(-0.22, 0.22, 7):
++            point = base_position.copy()
++            point[:2] += np.asarray((local_x, local_y))
++            point[2] = 0.008
++            value = 0.0
++            for contact in contacts:
++                delta = point[:2] - np.asarray(contact["position_m"][:2])
++                weight = math.exp(-float(delta @ delta) / (2.0 * 0.095 * 0.095))
++                value += float(contact["friction_signed_n"]) * weight
++            field_points.append((point, value))
++    max_field = max((abs(value) for _, value in field_points), default=0.0)
++    if max_field > 1e-6:
++        for point, value in field_points:
++            normalized = float(np.clip(value / max_field, -1.0, 1.0))
++            if abs(normalized) < 0.06:
++                continue
++            if normalized >= 0.0:
++                color = (0.92, 0.14 + 0.25 * (1.0 - normalized), 0.12, 0.22 + 0.38 * normalized)
++            else:
++                strength = abs(normalized)
++                color = (0.08, 0.26 + 0.24 * (1.0 - strength), 0.95, 0.22 + 0.38 * strength)
++            _add_geom(
++                scene,
++                mujoco.mjtGeom.mjGEOM_ELLIPSOID,
++                np.asarray((0.011, 0.011, 0.0025)),
++                point,
++                color,
++            )
++
++    # Contact heat points and real force arrows with log-scaled display length.
++    for contact in contacts:
++        position = np.asarray(contact["position_m"], dtype=np.float64)
++        force = np.asarray(contact["force_world_n"], dtype=np.float64)
++        magnitude = float(np.linalg.norm(force))
++        heat = float(np.clip(math.log1p(contact["normal_force_n"]) / math.log(80.0), 0.0, 1.0))
++        _add_geom(
++            scene,
++            mujoco.mjtGeom.mjGEOM_SPHERE,
++            np.asarray((0.014 + 0.013 * heat,) * 3),
++            position + np.asarray((0.0, 0.0, 0.012)),
++            (1.0, 0.82 - 0.60 * heat, 0.05, 0.82),
++        )
++        if magnitude > 1e-6:
++            direction = force / magnitude
++            end = position + direction * log_arrow_length(magnitude)
++            _add_connector(
++                scene,
++                mujoco.mjtGeom.mjGEOM_ARROW,
++                position,
++                end,
++                0.008,
++                (0.20, 0.95, 0.78, 0.94),
++            )
++
++    # Selected joint: true anchor plus two DERIVED signed vortex glyphs.
++    joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, selected_joint)
++    anchor = np.asarray(data.xanchor[joint_id], dtype=np.float64)
++    axis = np.asarray(data.xaxis[joint_id], dtype=np.float64)
++    _add_geom(
++        scene,
++        mujoco.mjtGeom.mjGEOM_SPHERE,
++        np.asarray((0.022, 0.022, 0.022)),
++        anchor,
++        (1.0, 0.82, 0.18, 0.92),
++    )
++    joint = record["joints"][selected_joint]
++    basis_a, basis_b = _orthogonal_basis(axis)
++    for torque, color, offset in (
++        (float(joint["drive_torque_nm"]), (1.0, 0.48, 0.12, 0.90), 0.0),
++        (float(joint["inertia_torque_nm"]), (0.16, 0.72, 1.0, 0.83), 0.010),
++    ):
++        if abs(torque) < 1e-5:
++            continue
++        radius = 0.030 + offset + min(0.035, 0.014 * math.log1p(abs(torque)))
++        sign = 1.0 if torque >= 0.0 else -1.0
++        points = []
++        for index in range(19):
++            theta = sign * 2.0 * math.pi * index / 18.0
++            points.append(anchor + radius * (math.cos(theta) * basis_a + math.sin(theta) * basis_b))
++        for index, (start, end) in enumerate(zip(points, points[1:])):
++            geom_type = mujoco.mjtGeom.mjGEOM_ARROW if index == len(points) - 2 else mujoco.mjtGeom.mjGEOM_LINE
++            _add_connector(scene, geom_type, start, end, 0.0045, color)
++
++
++class AnalysisVideoWriter:
++    """Composes a 1920x1080 engineering dashboard around MuJoCo frames."""
++
++    def __init__(self, path: Path, fps: int, joint_names: list[str]):
++        path.parent.mkdir(parents=True, exist_ok=True)
++        self.path = path
++        self.fps = fps
++        self.joint_names = joint_names
++        self.writer = imageio.get_writer(
++            path,
++            fps=fps,
++            codec="libx264",
++            quality=8,
++            pixelformat="yuv420p",
++            macro_block_size=None,
++        )
++        self.history: list[dict[str, Any]] = []
++        self.title_font = _font(27, bold=True)
++        self.heading_font = _font(21, bold=True)
++        self.body_font = _font(17)
++        self.small_font = _font(14)
++        self.mono_font = _font(15)
++
++    def selected_joint(self, time_s: float) -> str:
++        index = int(time_s / 2.5) % len(self.joint_names)
++        return self.joint_names[index]
++
++    def append(self, frame: np.ndarray, record: dict[str, Any]) -> None:
++        self.history.append(record)
++        selected = self.selected_joint(float(record["time_s"]))
++        canvas = Image.new("RGB", (1920, 1080), BG)
++        sim = Image.fromarray(frame).resize((1280, 720), Image.Resampling.LANCZOS)
++        canvas.paste(sim, (0, 56))
++        draw = ImageDraw.Draw(canvas, "RGBA")
++
++        draw.rectangle((0, 0, 1280, 56), fill=(5, 13, 23, 246))
++        draw.text((22, 12), "MicroDuck 轮滑障碍秀 · 物理分析回放", font=self.title_font, fill=TEXT)
++        draw.text((930, 15), "SIM · MuJoCo · 50 Hz", font=self.body_font, fill=(91, 221, 176))
++        draw.rounded_rectangle((18, 74, 406, 139), radius=10, fill=(4, 12, 20, 206), outline=(65, 92, 117, 220))
++        draw.text((34, 83), f"t = {record['time_s']:05.2f} s   phase = {record['phase']}", font=self.body_font, fill=TEXT)
++        draw.text((34, 112), f"焦点关节：{selected}", font=self.body_font, fill=ACCENT)
++        draw.rounded_rectangle((18, 693, 534, 758), radius=10, fill=(4, 12, 20, 206), outline=(65, 92, 117, 220))
++        draw.text((33, 702), "红↔蓝地面点：派生摩擦场   绿箭头：真实接触力（对数长度）", font=self.small_font, fill=TEXT)
++        draw.text((33, 729), "橙/蓝涡旋：驱动/惯性力矩 glyph   黄点：接触热力", font=self.small_font, fill=MUTED)
++
++        self._draw_joint_panel(draw, record, selected)
++        self._draw_bottom_panel(draw, record)
++        self.writer.append_data(np.asarray(canvas))
++
++    def _draw_joint_panel(self, draw: ImageDraw.ImageDraw, record: dict[str, Any], selected: str) -> None:
++        draw.rectangle((1280, 0, 1919, 1079), fill=PANEL)
++        draw.text((1305, 24), "关节诊断", font=self.title_font, fill=TEXT)
++        draw.text((1305, 60), selected, font=self.heading_font, fill=ACCENT)
++        values = record["joints"][selected]
++        metrics = (
++            ("位移", values["displacement_rad"], "rad"),
++            ("速度", values["velocity_radps"], "rad/s"),
++            ("驱动力矩", values["drive_torque_nm"], "N·m"),
++            ("惯性力矩", values["inertia_torque_nm"], "N·m"),
++            ("约束力矩", values["constraint_torque_nm"], "N·m"),
++        )
++        for index, (label, value, unit) in enumerate(metrics):
++            x = 1305 + (index % 2) * 295
++            y = 101 + (index // 2) * 61
++            draw.text((x, y), label, font=self.small_font, fill=MUTED)
++            draw.text((x, y + 21), f"{value:+8.3f} {unit}", font=self.body_font, fill=TEXT)
++        rpy = values["body_rpy_deg"]
++        draw.text((1600, 223), "姿态 R/P/Y", font=self.small_font, fill=MUTED)
++        draw.text((1600, 244), f"{rpy[0]:+.1f}° / {rpy[1]:+.1f}° / {rpy[2]:+.1f}°", font=self.small_font, fill=TEXT)
++
++        recent = self.history[-min(len(self.history), self.fps * 6):]
++        self._draw_chart(
++            draw,
++            (1305, 286, 1894, 516),
++            "六维传递力 · Force",
++            recent,
++            selected,
++            "force_n",
++            FORCE_COLORS,
++            ("Fx", "Fy", "Fz"),
++            "N",
++        )
++        self._draw_chart(
++            draw,
++            (1305, 544, 1894, 774),
++            "六维传递力矩 · Torque",
++            recent,
++            selected,
++            "torque_nm",
++            TORQUE_COLORS,
++            ("Tx", "Ty", "Tz"),
++            "N·m",
++        )
++        draw.text((1305, 806), "图层", font=self.heading_font, fill=TEXT)
++        legend = (
++            ("●", (255, 184, 41), "接触法向力热力点"),
++            ("→", (66, 239, 191), "接触合力矢量（长度为动态对数比例）"),
++            ("↻", (255, 122, 31), "驱动力矩涡旋 · DERIVED"),
++            ("↺", (45, 183, 255), "惯性力矩涡旋 · DERIVED"),
++            ("▰", (235, 54, 46), "正向切向摩擦 · DERIVED"),
++            ("▰", (34, 91, 242), "反向切向摩擦 · DERIVED"),
++        )
++        for index, (symbol, color, label) in enumerate(legend):
++            y = 846 + index * 31
++            draw.text((1308, y), symbol, font=self.heading_font, fill=color)
++            draw.text((1344, y + 2), label, font=self.body_font, fill=TEXT)
++        draw.text((1305, 1041), "cfrc_int：仿真关节传递量，不是真机传感器读数", font=self.small_font, fill=MUTED)
++
++    def _draw_chart(
++        self,
++        draw: ImageDraw.ImageDraw,
++        box: tuple[int, int, int, int],
++        title: str,
++        records: list[dict[str, Any]],
++        joint: str,
++        key: str,
++        colors: tuple[tuple[int, int, int], ...],
++        labels: tuple[str, str, str],
++        unit: str,
++    ) -> None:
++        x0, y0, x1, y1 = box
++        draw.rounded_rectangle(box, radius=10, fill=(8, 18, 31), outline=GRID)
++        draw.text((x0 + 14, y0 + 10), title, font=self.body_font, fill=TEXT)
++        values = np.asarray([record["joints"][joint][key] for record in records], dtype=np.float64)
++        max_abs = max(1e-3, float(np.max(np.abs(values))) if values.size else 1.0)
++        plot = (x0 + 16, y0 + 48, x1 - 16, y1 - 30)
++        px0, py0, px1, py1 = plot
++        middle = (py0 + py1) // 2
++        draw.line((px0, middle, px1, middle), fill=GRID, width=1)
++        for fraction in (0.25, 0.75):
++            y = int(py0 + (py1 - py0) * fraction)
++            draw.line((px0, y, px1, y), fill=(30, 46, 63), width=1)
++        if len(records) > 1:
++            for axis in range(3):
++                points = []
++                for index, value in enumerate(values[:, axis]):
++                    x = px0 + int((px1 - px0) * index / (len(records) - 1))
++                    y = middle - int((py1 - py0) * 0.46 * float(value) / max_abs)
++                    points.append((x, y))
++                draw.line(points, fill=colors[axis], width=2)
++        draw.text((x0 + 14, y1 - 25), f"±{max_abs:.2f} {unit}", font=self.small_font, fill=MUTED)
++        for axis, label in enumerate(labels):
++            x = x0 + 172 + axis * 122
++            current = float(values[-1, axis]) if values.size else 0.0
++            draw.line((x, y1 - 17, x + 18, y1 - 17), fill=colors[axis], width=3)
++            draw.text((x + 24, y1 - 26), f"{label} {current:+.2f}", font=self.small_font, fill=TEXT)
++
++    def _draw_bottom_panel(self, draw: ImageDraw.ImageDraw, record: dict[str, Any]) -> None:
++        draw.rectangle((0, 776, 1280, 1080), fill=(9, 20, 34))
++        draw.text((22, 795), "接触力分布 / 摩擦力场", font=self.heading_font, fill=TEXT)
++        map_box = (22, 831, 465, 1056)
++        draw.rounded_rectangle(map_box, radius=10, fill=(6, 15, 26), outline=GRID)
++        contacts = record["contacts"]
++        base = np.asarray(record["base_position_m"][:2], dtype=np.float64)
++        yaw = math.radians(float(record["base_rpy_deg"][2]))
++        rotation = np.asarray(((math.cos(yaw), math.sin(yaw)), (-math.sin(yaw), math.cos(yaw))))
++        local_contacts = []
++        for contact in contacts:
++            local = rotation @ (np.asarray(contact["position_m"][:2]) - base)
++            local_contacts.append((local, contact))
++        # DERIVED red-blue interpolation field.
++        for gx in range(22):
++            for gy in range(11):
++                lx = -0.38 + 0.76 * gx / 21.0
++                ly = -0.28 + 0.56 * gy / 10.0
++                value = 0.0
++                for local, contact in local_contacts:
++                    delta = np.asarray((lx, ly)) - local
++                    value += float(contact["friction_signed_n"]) * math.exp(-float(delta @ delta) / 0.018)
++                strength = float(np.clip(abs(value) / 8.0, 0.0, 1.0))
++                if strength < 0.025:
++                    continue
++                color = (235, 50, 47, int(30 + 170 * strength)) if value >= 0.0 else (39, 91, 238, int(30 + 170 * strength))
++                x = map_box[0] + 9 + int((map_box[2] - map_box[0] - 18) * gx / 21.0)
++                y = map_box[3] - 9 - int((map_box[3] - map_box[1] - 18) * gy / 10.0)
++                draw.rectangle((x - 8, y - 8, x + 8, y + 8), fill=color)
++        draw.line((243, 844, 243, 1042), fill=(95, 112, 130), width=1)
++        draw.line((36, 943, 451, 943), fill=(95, 112, 130), width=1)
++        for local, contact in local_contacts:
++            x = 243 + int(local[0] / 0.38 * 199)
++            y = 943 - int(local[1] / 0.28 * 94)
++            radius = int(5 + min(17, 4.5 * math.log1p(float(contact["normal_force_n"]))))
++            draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=(255, 181, 35, 188), outline=(255, 235, 159, 230), width=2)
++
++        draw.text((495, 795), "当前接触", font=self.heading_font, fill=TEXT)
++        draw.text((495, 837), f"接触点       {len(contacts):3d}", font=self.body_font, fill=TEXT)
++        draw.text((495, 870), f"法向合力     {record['total_normal_force_n']:8.2f} N", font=self.body_font, fill=TEXT)
++        draw.text((495, 903), f"切向摩擦合力 {record['total_friction_force_n']:8.2f} N", font=self.body_font, fill=TEXT)
++        strongest = sorted(contacts, key=lambda item: item["normal_force_n"], reverse=True)[:3]
++        for index, contact in enumerate(strongest):
++            draw.text(
++                (495, 950 + index * 29),
++                f"{index + 1}. {contact['geom1']} / {contact['geom2']}  {contact['normal_force_n']:.1f} N",
++                font=self.small_font,
++                fill=MUTED,
++            )
++
++        draw.text((855, 795), "说明", font=self.heading_font, fill=TEXT)
++        notes = (
++            "• 原始值：qpos/qvel/qfrc/cfrc/contact",
++            "• 力箭头方向真实，长度采用 log1p 缩放",
++            "• 红—蓝连续场来自离散摩擦力高斯插值",
++            "• 涡旋只编码扭矩方向与幅值，不是流体场",
++            "• 视频自动轮播关节；交互页可点击切换",
++            "• 所有数值同步写入 JSON/CSV 便于复核",
++        )
++        for index, note in enumerate(notes):
++            draw.text((855, 837 + index * 34), note, font=self.body_font, fill=TEXT if index < 2 else MUTED)
++
++    def close(self) -> None:
++        self.writer.close()
++
++
++def write_interactive_viewer(
++    viewer_dir: Path,
++    telemetry_json: Path,
++    analysis_video: Path,
++) -> None:
++    viewer_dir.mkdir(parents=True, exist_ok=True)
++    payload = telemetry_json.read_text(encoding="utf-8")
++    (viewer_dir / "telemetry.js").write_text(
++        "window.PHYSICS_TELEMETRY=" + payload + ";\n", encoding="utf-8"
++    )
++    relative_video = Path("..") / analysis_video.name
++    html = f'''<!doctype html>
++<html lang="zh-CN">
++<head>
++<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
++<title>MicroDuck 物理回放</title>
++<style>
++:root{{--bg:#07101c;--panel:#0d1a2b;--line:#2b3d53;--text:#e5edf5;--muted:#8ba0b6;--accent:#ffae45}}
++*{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,"Microsoft YaHei",sans-serif}}
++header{{height:66px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;border-bottom:1px solid var(--line)}}
++h1{{font-size:22px;margin:0}} .badge{{color:#5de0b2}} main{{display:grid;grid-template-columns:minmax(620px,1.35fr) minmax(470px,.65fr);gap:18px;padding:18px}}
++.card{{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}} video{{display:block;width:100%;background:#000}}
++.note{{padding:12px 16px;color:var(--muted)}} .side{{display:grid;gap:18px}} .card-pad{{padding:18px}} h2{{font-size:17px;margin:0 0 14px}}
++.joint-map{{height:270px;position:relative;background:radial-gradient(circle at 50% 45%,#182b42 0 12%,transparent 13%),linear-gradient(90deg,transparent 49.5%,#263a50 50%,transparent 50.5%);border:1px solid var(--line);border-radius:10px}}
++.joint{{position:absolute;transform:translate(-50%,-50%);border:1px solid #53677d;background:#13263a;color:var(--text);border-radius:999px;padding:7px 10px;cursor:pointer;white-space:nowrap;font-size:12px}}
++.joint:hover,.joint.active{{background:var(--accent);color:#111;border-color:var(--accent)}} canvas{{width:100%;height:230px;background:#07111e;border-radius:9px}}
++.stats{{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}} .stat{{padding:9px;background:#081522;border-radius:8px}} .stat b{{display:block;color:var(--accent)}}
++.legend{{color:var(--muted);font-size:13px}} @media(max-width:1000px){{main{{grid-template-columns:1fr}}}}
++</style>
++</head>
++<body>
++<header><h1>MicroDuck 物理分析回放</h1><span class="badge">SIM · MuJoCo · 50 Hz</span></header>
++<main>
++  <section class="card"><video id="video" controls preload="metadata" src="{relative_video.as_posix()}"></video><div class="note">分析视频会自动轮播代表关节；右侧点击关节可独立检查该关节六维力/力矩曲线。红蓝场和涡旋为派生可视化，原始数值来自遥测。</div></section>
++  <aside class="side">
++    <section class="card card-pad"><h2>点击关节</h2><div id="jointMap" class="joint-map"></div></section>
++    <section class="card card-pad"><h2 id="chartTitle">六维传递力 / 力矩</h2><canvas id="chart" width="900" height="420"></canvas><div id="stats" class="stats"></div></section>
++    <section class="card card-pad legend">cfrc_int 是 MuJoCo 递归牛顿—欧拉后约束计算得到的关节/刚体空间传递量，并非真机六维力传感器读数。驱动力矩与惯性力矩分别来自 qfrc_actuator 和 M(q)qacc。</section>
++  </aside>
++</main>
++<script src="telemetry.js"></script>
++<script>
++const data=window.PHYSICS_TELEMETRY, video=document.getElementById('video'), canvas=document.getElementById('chart'), ctx=canvas.getContext('2d');
++let selected=data.joint_names[0];
++const positions={{head_pitch:[50,13],left_hip_pitch:[31,34],right_hip_pitch:[69,34],left_knee:[26,55],right_knee:[74,55],left_ankle:[20,72],right_ankle:[80,72],passive_LF_wheel:[17,89],passive_RF_wheel:[83,89]}};
++const map=document.getElementById('jointMap');
++data.joint_names.forEach((name,i)=>{{const b=document.createElement('button');b.className='joint';b.textContent=name;const p=positions[name]||[15+(i%4)*23,20+Math.floor(i/4)*32];b.style.left=p[0]+'%';b.style.top=p[1]+'%';b.onclick=()=>{{selected=name;syncButtons();draw()}};b.dataset.name=name;map.appendChild(b)}});
++function syncButtons(){{document.querySelectorAll('.joint').forEach(b=>b.classList.toggle('active',b.dataset.name===selected));document.getElementById('chartTitle').textContent=selected+' · 六维传递力 / 力矩'}}
++function recordIndex(){{return Math.min(data.records.length-1,Math.max(0,Math.round(video.currentTime*data.control_hz)))}}
++function drawSeries(records,key,axis,color,y0,h,maxAbs){{ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();records.forEach((r,i)=>{{const v=r.joints[selected][key][axis],x=54+i*(canvas.width-76)/Math.max(1,records.length-1),y=y0+h/2-v/maxAbs*h*.44;i?ctx.lineTo(x,y):ctx.moveTo(x,y)}});ctx.stroke()}}
++function draw(){{const idx=recordIndex(),from=Math.max(0,idx-data.control_hz*6),records=data.records.slice(from,idx+1),j=data.records[idx].joints[selected];ctx.clearRect(0,0,canvas.width,canvas.height);ctx.fillStyle='#07111e';ctx.fillRect(0,0,canvas.width,canvas.height);const sets=[['force_n',['#56c0ff','#44e7a6','#ff6f91'],38,150,'N'],['torque_nm',['#ffb94b','#b37dff','#ff5b4a'],230,150,'N·m']];sets.forEach((s,si)=>{{const vals=records.flatMap(r=>r.joints[selected][s[0]]),m=Math.max(.001,...vals.map(Math.abs));ctx.strokeStyle='#2b3d53';ctx.beginPath();ctx.moveTo(48,s[2]+75);ctx.lineTo(882,s[2]+75);ctx.stroke();for(let a=0;a<3;a++)drawSeries(records,s[0],a,s[1][a],s[2],s[3],m);ctx.fillStyle='#8ba0b6';ctx.fillText((si?'Torque Tx/Ty/Tz ':'Force Fx/Fy/Fz ')+'±'+m.toFixed(2)+' '+s[4],54,s[2]-10)}});const fmt=(v,u)=>'<b>'+Number(v).toFixed(3)+' '+u+'</b>',txt=v=>'<b>'+v+'</b>';document.getElementById('stats').innerHTML='<div class="stat">位移'+fmt(j.displacement_rad,'rad')+'</div><div class="stat">驱动力矩'+fmt(j.drive_torque_nm,'N·m')+'</div><div class="stat">惯性力矩'+fmt(j.inertia_torque_nm,'N·m')+'</div><div class="stat">约束力矩'+fmt(j.constraint_torque_nm,'N·m')+'</div><div class="stat">姿态 R/P/Y'+txt(j.body_rpy_deg.map(v=>v.toFixed(1)).join(' / ')+' °')+'</div><div class="stat">时间'+fmt(data.records[idx].time_s,'s')+'</div>'}}
++video.addEventListener('timeupdate',draw);syncButtons();draw();
++</script>
++</body></html>'''
++    (viewer_dir / "index.html").write_text(html, encoding="utf-8")
+diff --git a/scripts/run_roller_showcase.py b/scripts/run_roller_showcase.py
+index 977beb7..f38de35 100644
+--- a/scripts/run_roller_showcase.py
++++ b/scripts/run_roller_showcase.py
+@@ -23,6 +23,12 @@ import onnxruntime as ort
+ 
+ from infer_policy import DEFAULT_POSE, PolicyInference
+ from mjlab_microduck.showcase import phase_at, smoothstep01, total_duration
++from physics_overlay import (
++    AnalysisVideoWriter,
++    PhysicsRecorder,
++    add_scene_overlays,
++    write_interactive_viewer,
++)
+ 
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+@@ -117,6 +123,14 @@ def build_parser() -> argparse.ArgumentParser:
+                         help="Output frame rate; 50 matches the policy control rate exactly.")
+     parser.add_argument("--duration", type=float, default=total_duration())
+     parser.add_argument("--no-video", action="store_true")
++    parser.add_argument("--analysis-video", type=Path, default=None,
++                        help="Optional 1920x1080 physics-analysis MP4; the clean video remains unchanged.")
++    parser.add_argument("--physics-json", type=Path, default=None,
++                        help="Nested per-step joint/contact telemetry used by the interactive viewer.")
++    parser.add_argument("--physics-csv", type=Path, default=None,
++                        help="Flat per-step representative-joint telemetry.")
++    parser.add_argument("--viewer-dir", type=Path, default=None,
++                        help="Directory for the offline clickable-joint playback page.")
+     return parser
+ 
+ 
+@@ -185,10 +199,29 @@ def main() -> None:
+     path_length_m = 0.0
+     previous_xy = data.qpos[qpos_adr:qpos_adr + 2].copy()
+ 
++    physics_enabled = any(
++        path is not None
++        for path in (args.analysis_video, args.physics_json, args.physics_csv, args.viewer_dir)
++    )
++    if args.viewer_dir is not None and args.analysis_video is None:
++        raise ValueError("--viewer-dir requires --analysis-video")
++    if physics_enabled:
++        artifact_dir = (
++            args.analysis_video.parent
++            if args.analysis_video is not None
++            else ROOT / "artifacts/showcase"
++        )
++        args.physics_json = args.physics_json or artifact_dir / "roller_physics_telemetry.json"
++        args.physics_csv = args.physics_csv or artifact_dir / "roller_physics_telemetry.csv"
++    physics_recorder = PhysicsRecorder(model, data, control_hz=50.0) if physics_enabled else None
++
+     writer = None
+     renderer = None
+-    if not args.no_video:
++    analysis_writer = None
++    analysis_renderer = None
++    if not args.no_video or args.analysis_video is not None:
+         os.environ.setdefault("MUJOCO_GL", "egl")
++    if not args.no_video:
+         args.video.parent.mkdir(parents=True, exist_ok=True)
+         writer = imageio.get_writer(
+             args.video,
+@@ -199,6 +232,12 @@ def main() -> None:
+             macro_block_size=None,
+         )
+         renderer = mujoco.Renderer(model, height=args.height, width=args.width)
++    if args.analysis_video is not None:
++        assert physics_recorder is not None
++        analysis_writer = AnalysisVideoWriter(
++            args.analysis_video, args.fps, physics_recorder.joint_names
++        )
++        analysis_renderer = mujoco.Renderer(model, height=args.height, width=args.width)
+ 
+     initial_yaw = _yaw_from_quat(data.qpos[qpos_adr + 3:qpos_adr + 7])
+     previous_yaw = initial_yaw
+@@ -306,6 +345,12 @@ def main() -> None:
+             for _ in range(decimation):
+                 mujoco.mj_step(model, data)
+ 
++            physics_record = (
++                physics_recorder.capture(time_s, phase.name)
++                if physics_recorder is not None
++                else None
++            )
++
+             quat = data.qpos[qpos_adr + 3:qpos_adr + 7].copy()
+             world_velocity = data.qvel[qvel_adr:qvel_adr + 3].copy()
+             body_velocity = policy.quat_rotate_inverse(quat, world_velocity)
+@@ -374,21 +419,41 @@ def main() -> None:
+             camera_azimuth += (target_camera_azimuth - camera_azimuth) * camera_alpha
+             camera_lookat += (target_camera_lookat - camera_lookat) * camera_alpha
+ 
+-            if renderer is not None and writer is not None and time_s + 1e-9 >= next_render_time:
++            if (
++                (renderer is not None or analysis_renderer is not None)
++                and time_s + 1e-9 >= next_render_time
++            ):
+                 camera = mujoco.MjvCamera()
+                 camera.type = mujoco.mjtCamera.mjCAMERA_FREE
+                 camera.lookat[:] = camera_lookat
+                 camera.distance = camera_distance
+                 camera.azimuth = camera_azimuth
+                 camera.elevation = -13.0
+-                renderer.update_scene(data, camera=camera)
+-                writer.append_data(renderer.render())
++                if renderer is not None and writer is not None:
++                    renderer.update_scene(data, camera=camera)
++                    writer.append_data(renderer.render())
++                if analysis_renderer is not None and analysis_writer is not None:
++                    assert physics_record is not None
++                    analysis_renderer.update_scene(data, camera=camera)
++                    selected_joint = analysis_writer.selected_joint(time_s)
++                    add_scene_overlays(
++                        analysis_renderer.scene,
++                        model,
++                        data,
++                        physics_record,
++                        selected_joint,
++                    )
++                    analysis_writer.append(analysis_renderer.render(), physics_record)
+                 next_render_time += render_dt
+     finally:
+         if writer is not None:
+             writer.close()
+         if renderer is not None:
+             renderer.close()
++        if analysis_writer is not None:
++            analysis_writer.close()
++        if analysis_renderer is not None:
++            analysis_renderer.close()
+ 
+     args.metrics.parent.mkdir(parents=True, exist_ok=True)
+     with args.metrics.open("w", encoding="utf-8", newline="") as file:
+@@ -396,6 +461,17 @@ def main() -> None:
+         csv_writer.writeheader()
+         csv_writer.writerows(rows)
+ 
++    if physics_recorder is not None:
++        assert args.physics_json is not None and args.physics_csv is not None
++        physics_recorder.write(args.physics_json, args.physics_csv)
++        if args.viewer_dir is not None:
++            assert args.analysis_video is not None
++            write_interactive_viewer(
++                args.viewer_dir,
++                args.physics_json,
++                args.analysis_video,
++            )
++
+     start_x = float(rows[0]["x_m"])
+     end_x = float(rows[-1]["x_m"])
+     min_z = min(float(row["trunk_z_m"]) for row in rows)
+diff --git a/tests/test_physics_overlay.py b/tests/test_physics_overlay.py
+new file mode 100644
+index 0000000..a6890e2
+--- /dev/null
++++ b/tests/test_physics_overlay.py
+@@ -0,0 +1,30 @@
++from pathlib import Path
++import sys
++
++import mujoco
++
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT / "scripts"))
++
++from physics_overlay import log_arrow_length, select_representative_joints  # noqa: E402
++
++
++def test_log_arrow_length_is_monotonic_and_bounded():
++    lengths = [log_arrow_length(value) for value in (0.0, 0.1, 1.0, 10.0, 1_000.0)]
++    assert lengths == sorted(lengths)
++    assert lengths[0] >= 0.025
++    assert lengths[-1] <= 0.24
++
++
++def test_representative_joint_selection_covers_head_legs_and_wheels():
++    scene = ROOT / "src/mjlab_microduck/robot/microduck/scene_roller_showcase.xml"
++    model = mujoco.MjModel.from_xml_path(str(scene))
++    selected = select_representative_joints(model)
++
++    assert "head_pitch" in selected
++    assert "left_knee" in selected
++    assert "right_knee" in selected
++    assert "passive_LF_wheel" in selected
++    assert "passive_RF_wheel" in selected
++    assert len(selected) == len(set(selected)) == 9
+-- 
+2.31.0.windows.1
+

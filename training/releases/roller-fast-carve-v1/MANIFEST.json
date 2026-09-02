@@ -1,10 +1,11 @@
 {
-  "release": "roller-fast-carve-v1.0.0",
-  "created_at": "2026-09-01T16:24:22+08:00",
+  "release": "roller-fast-carve-v1.1.0",
+  "created_at": "2026-09-02T18:40:00+08:00",
   "evidence_level": "SIM",
   "upstream_repository": "https://github.com/pollen-robotics/microduck_rl",
   "upstream_base_commit": "d424a0c899f6b33cbd3daeb279913134349c0b63",
   "experiment_commit": "98701254cd78e3d197dd8e2a0366b61cdf121073",
+  "physics_overlay_commit": "212997d35e37ff1f216710b1d9f0b35eca5964a4",
   "training": {
     "os": "WSL2 Ubuntu 24.04.3 LTS",
     "gpu": "NVIDIA GeForce RTX 5060 Ti 16 GB",
@@ -16,6 +17,15 @@
     "policy_step_seconds": 0.02
   },
   "payload": [
+    {"path":"evidence/roller_fast_carve_physics_overlay_50fps.mp4","bytes":30987462,"sha256":"741d1e85b9dab8e3deef8854c6c5db41018e28d851adbebe6ccd9da51a33c544"},
+    {"path":"evidence/roller_fast_carve_physics_preview.jpg","bytes":245694,"sha256":"887616a0bed460f5f11632ddfb1c19f5500d270e2a4ef25d9f9433098a87b604"},
+    {"path":"evidence/roller_fast_carve_physics_replay_metrics.csv","bytes":243208,"sha256":"95827e6f74057bed42b73c6ebf53b786621cffe6f0a07155f9619547511c71fd"},
+    {"path":"evidence/roller_fast_carve_physics_replay_summary.json","bytes":1234,"sha256":"bfb4cfdca9dace5edd7cb16fad2c9c56d3327dc0a531f2c86278ffe58292b102"},
+    {"path":"evidence/roller_fast_carve_physics_telemetry.csv","bytes":2634631,"sha256":"37c4f1f048b290e577cbd8b0a5c139c001c241eab6e1ad41cafef7ca1fa25b61"},
+    {"path":"evidence/roller_fast_carve_physics_telemetry.json","bytes":6800543,"sha256":"86400f808b8db9c6910c8bb282868aacb95be4a2a1efa9389ebb37bb822c86ba"},
+    {"path":"evidence/physics-viewer/index.html","bytes":5822,"sha256":"70ccd91a1f2e0146c63300bcf693444755abf106321c73ffc296a9be74df103d"},
+    {"path":"evidence/physics-viewer/telemetry.js","bytes":6800570,"sha256":"b20bce6d08b4fdb9eca1704890384b72fd834b28f15037466efd630575c0f022"},
+    {"path":"source-patches/0003-feat-showcase-add-physics-telemetry-overlays.patch","bytes":43096,"sha256":"89d83f5bf89f2d121f8cebe3fc3728b5fb89881c367e592369fbe0faae7c099a"},
     {"path":"evidence/roller_fast_carve_gate_final_50fps.mp4","bytes":17353457,"sha256":"d099bc54c35389bf1bae8c056f2470f8d049c63f9d65712e13f3143442ca465c"},
     {"path":"evidence/roller_fast_carve_gate_final_contact_sheet.jpg","bytes":37657,"sha256":"ec87c741187368233e60bc5af703d57d5a8dcfc645933f277d3252f05c6b672b"},
     {"path":"evidence/roller_fast_carve_gate_final_metrics.csv","bytes":243208,"sha256":"95827e6f74057bed42b73c6ebf53b786621cffe6f0a07155f9619547511c71fd"},

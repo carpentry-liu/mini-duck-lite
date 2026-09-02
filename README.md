@@ -10,7 +10,9 @@
 
 在 4,096 个并行环境中训练并组合三个 50 Hz ONNX 策略，完成 19.48 秒连续物理仿真：远距离加速、带速甩弯、边滑边低头穿杆、出杆渐起、344.8° 旋转和急停歪头。证据等级为 **SIM**。
 
-[播放完整视频](training/releases/roller-fast-carve-v1/evidence/roller_fast_carve_gate_final_50fps.mp4) ｜ [阅读技术实验报告](https://carpentry-liu.github.io/blog/physical-ai-01-training-evidence.html) ｜ [查看权重、日志与量化数据](training/releases/roller-fast-carve-v1/README.md)
+[播放纯净版](training/releases/roller-fast-carve-v1/evidence/roller_fast_carve_gate_final_50fps.mp4) ｜ [播放物理分析版](training/releases/roller-fast-carve-v1/evidence/roller_fast_carve_physics_overlay_50fps.mp4) ｜ [阅读技术实验报告](https://carpentry-liu.github.io/blog/physical-ai-01-training-evidence.html) ｜ [查看权重、日志与量化数据](training/releases/roller-fast-carve-v1/README.md)
+
+物理分析版同步显示代表性关节的位移、速度、姿态、驱动/惯性/约束力矩和六维传递力，叠加接触力矢量、接触热力图、红—蓝摩擦力场与扭矩涡旋。连续场和涡旋是由真实离散量生成的 `DERIVED` 图层；原始 50 Hz JSON/CSV 与可点击关节的交互回放页一并收录在发布包中。
 
 ## 基于 Microduck，但不止于复刻
 
@@ -82,11 +84,11 @@ V0.4 的关键变化是 **No Hardware, No Done**：仿真、mock 和视频可以
 | 自有 10DOF RL 策略 | ⏳ 未完成 | 官方 14DOF policy 不能下发给目标硬件 |
 | 真实舵机/单腿/全身 | ⏳ 未接入 | 等 H1 实物资格测试，不冒充 HIL/REAL |
 
-正式训练证据见 [`2026-08-31-upstream-walk-training.md`](docs/experiments/2026-08-31-upstream-walk-training.md)；传播动作的设计、训练与检查点对比见 [`2026-09-01-drunken-boxing-training.md`](docs/experiments/2026-09-01-drunken-boxing-training.md)；带速甩弯、动态低头穿杆训练与逐项验收见 [`2026-09-01-roller-obstacle-showcase.md`](docs/experiments/2026-09-01-roller-obstacle-showcase.md)。这些结果证明训练链路能用，不代表 10DOF 真机已经会走或会做同样动作。
+正式训练证据见 [`2026-08-31-upstream-walk-training.md`](docs/experiments/2026-08-31-upstream-walk-training.md)；传播动作的设计、训练与检查点对比见 [`2026-09-01-drunken-boxing-training.md`](docs/experiments/2026-09-01-drunken-boxing-training.md)；带速甩弯、动态低头穿杆训练与逐项验收见 [`2026-09-01-roller-obstacle-showcase.md`](docs/experiments/2026-09-01-roller-obstacle-showcase.md)；物理量来源、单位和派生图层边界见 [`2026-09-02-roller-physics-visualization.md`](docs/experiments/2026-09-02-roller-physics-visualization.md)。这些结果证明训练链路能用，不代表 10DOF 真机已经会走或会做同样动作。
 
 ### 可下载训练发布包
 
-[`roller-fast-carve-v1.0.0`](training/releases/roller-fast-carve-v1/README.md) 已公开保存完整复现材料：源码补丁、PPO checkpoint、ONNX、TensorBoard event、终端日志、逐控制步 CSV、验收 JSON 和 1280×720 / 50 fps 视频。每个载荷都有 SHA-256；大文件使用 Git LFS。该发布包证据等级为 **SIM**，不冒充真机成果。
+[`roller-fast-carve-v1.1.0`](training/releases/roller-fast-carve-v1/README.md) 已公开保存完整复现材料：源码补丁、PPO checkpoint、ONNX、TensorBoard event、终端日志、逐控制步 JSON/CSV、验收数据、纯净视频、1080p 物理分析视频和可点击关节的交互页。每个载荷都有 SHA-256；大文件使用 Git LFS。该发布包证据等级为 **SIM**，不冒充真机成果。
 
 ## 强化学习是在 WSL2 里训练的吗
 
