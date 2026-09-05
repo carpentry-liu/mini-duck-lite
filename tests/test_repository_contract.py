@@ -74,6 +74,7 @@ def test_walk_evaluator_uses_fixed_commands_and_quantitative_acceptance() -> Non
     script = (ROOT / "scripts/evaluate_upstream_walk.py").read_text(
         encoding="utf-8"
     )
+    acceptance = (ROOT / "scripts/walk_acceptance.py").read_text(encoding="utf-8")
 
     assert MICRODUCK_RL_COMMIT in script
     assert MICRODUCK_TASK_ID in script
@@ -82,9 +83,9 @@ def test_walk_evaluator_uses_fixed_commands_and_quantitative_acceptance() -> Non
     assert 'get_term("nan_state")' in script
     assert '"linear_velocity_rmse_mps"' in script
     assert '"no_fall_environment_fraction"' in script
-    assert '"forward_velocity_rmse_mps_max"' in script
-    assert '"absolute_mean_yaw_velocity_radps_max"' in script
-    assert '"absolute_mean_lateral_velocity_mps_max"' in script
+    assert '"forward_velocity_rmse_mps_max"' in acceptance
+    assert '"mean_absolute_environment_net_yaw_error_radps_max"' in acceptance
+    assert '"mean_absolute_environment_net_lateral_error_mps_max"' in acceptance
     assert "VideoRecorder" in script
     assert 'render_mode="rgb_array"' in script
     assert "default=1280" in script

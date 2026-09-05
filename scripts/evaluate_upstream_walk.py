@@ -24,6 +24,7 @@ from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.wrappers import VideoRecorder
+from walk_acceptance import assess_walk_acceptance
 
 
 TASK_ID = "Mjlab-Velocity-Flat-MicroDuck"
@@ -138,6 +139,8 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     forward_velocity = 0.0
     lateral_velocity = 0.0
     lateral_absolute_velocity = 0.0
+    lateral_error_per_env = torch.zeros(args.num_envs, device=args.device)
+    yaw_error_per_env = torch.zeros(args.num_envs, device=args.device)
     action_rate_squared = 0.0
     reward_sum = 0.0
     measured_steps = 0
@@ -167,6 +170,8 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
                     lateral_absolute_velocity += torch.sum(
                         torch.abs(actual_linear[:, 1])
                     ).item()
+                    lateral_error_per_env += actual_linear[:, 1] - command[:, 1]
+                    yaw_error_per_env += actual_yaw - command[:, 2]
                     if previous_actions is not None:
                         action_rate_squared += torch.sum(
                             torch.square(actions - previous_actions)
@@ -192,17 +197,18 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
         mean_lateral_velocity = lateral_velocity / scalar_count
         mean_yaw_velocity = yaw_velocity / scalar_count
         no_fall_fraction = 1.0 - torch.mean(ever_fell.float()).item()
-        passed = (
-            no_fall_fraction >= 0.95
-            and forward_velocity_rmse <= 0.12
-            and abs(mean_forward_velocity - args.command_x) <= 0.10
-            and abs(mean_yaw_velocity) <= 0.15
-            and abs(mean_lateral_velocity) <= 0.05
-            and nan_events == 0
+        acceptance = assess_walk_acceptance(
+            no_fall_fraction=no_fall_fraction,
+            forward_velocity_rmse=forward_velocity_rmse,
+            mean_forward_velocity=mean_forward_velocity,
+            command_x=args.command_x,
+            mean_lateral_errors=(lateral_error_per_env / measured_steps).tolist(),
+            mean_yaw_errors=(yaw_error_per_env / measured_steps).tolist(),
+            nan_events=nan_events,
         )
 
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "evaluated_at": datetime.now().astimezone().isoformat(),
             "task_id": TASK_ID,
             "expected_upstream_commit": EXPECTED_UPSTREAM_COMMIT,
@@ -236,19 +242,18 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
                 "mean_absolute_lateral_velocity_mps": (
                     lateral_absolute_velocity / scalar_count
                 ),
+                "mean_absolute_environment_net_yaw_error_radps": acceptance[
+                    "mean_absolute_environment_net_yaw_error_radps"
+                ],
+                "mean_absolute_environment_net_lateral_error_mps": acceptance[
+                    "mean_absolute_environment_net_lateral_error_mps"
+                ],
                 "action_delta_rms": (action_rate_squared / action_count) ** 0.5,
                 "mean_reward_per_step": reward_sum / (args.steps * args.num_envs),
             },
             "acceptance": {
-                "passed": passed,
-                "criteria": {
-                    "no_fall_environment_fraction_min": 0.95,
-                    "forward_velocity_rmse_mps_max": 0.12,
-                    "mean_forward_velocity_tolerance_mps": 0.10,
-                    "absolute_mean_yaw_velocity_radps_max": 0.15,
-                    "absolute_mean_lateral_velocity_mps_max": 0.05,
-                    "nan_events_max": 0,
-                },
+                "passed": acceptance["passed"],
+                "criteria": acceptance["criteria"],
             },
         }
     finally:
