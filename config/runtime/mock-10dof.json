@@ -3,6 +3,7 @@
   "control_hz": 50,
   "command_timeout_ms": 100,
   "imu_timeout_ms": 100,
+  "servo_timeout_ms": 100,
   "max_tick_late_ms": 10,
   "limits_source": "SIM_ONLY",
   "soft_limits_rad": {

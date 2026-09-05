@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import time
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 
 @dataclass(frozen=True)
@@ -31,6 +31,16 @@ class ImuSample:
 
 
 class ServoBus(Protocol):
+    """Synchronous I/O with backend-enforced, finite transport timeouts.
+
+    Before hardware admission, all calls (including torque_off) must have a
+    measured bound that fits the runtime's 20 ms cycle. Writes must finish or
+    fail within that bound, with no queued writes executing after return.
+    State timestamps use the runtime's monotonic clock and identify acquisition
+    time; returning cached feedback must not refresh its timestamp. SafeRuntime
+    cannot interrupt a blocked call: the real bus also needs a local watchdog.
+    """
+
     def read(self, bus_id: int) -> ServoState: ...
 
     def write_position(self, bus_id: int, position_rad: float) -> None: ...
@@ -41,6 +51,13 @@ class ServoBus(Protocol):
 
 
 class ImuBackend(Protocol):
+    """Reads must obey a finite backend timeout within the control budget.
+
+    timestamp_s identifies acquisition on the runtime's monotonic clock.
+    A cached sample keeps its acquisition timestamp. Optional driver adapters
+    do not establish transport bounds; qualify those before hardware admission.
+    """
+
     def read(self) -> ImuSample: ...
 
     def close(self) -> None: ...
@@ -49,13 +66,16 @@ class ImuBackend(Protocol):
 class MockServoBus:
     """Deterministic servo model for CI and dry runs; never HIL evidence."""
 
-    def __init__(self, bus_ids: list[int]) -> None:
+    def __init__(
+        self, bus_ids: list[int], *, clock: Callable[[], float] = time.monotonic
+    ) -> None:
         if not bus_ids or len(bus_ids) != len(set(bus_ids)):
             raise ValueError("mock bus IDs must be non-empty and unique")
         self._positions = {bus_id: 0.0 for bus_id in bus_ids}
         self._targets = dict(self._positions)
         self._connected = {bus_id: True for bus_id in bus_ids}
         self._torque_enabled = True
+        self._clock = clock
 
     def write_position(self, bus_id: int, position_rad: float) -> None:
         if bus_id not in self._positions:
@@ -93,7 +113,7 @@ class MockServoBus:
             temperature_c=28.0 + min(error, 1.0) * 2.0,
             latency_ms=1.5 + bus_id * 0.1,
             connected=connected,
-            timestamp_s=time.monotonic(),
+            timestamp_s=self._clock(),
         )
 
     def set_connected(self, bus_id: int, connected: bool) -> None:
@@ -109,8 +129,9 @@ class MockServoBus:
 
 
 class MockImuBackend:
-    def __init__(self) -> None:
+    def __init__(self, *, clock: Callable[[], float] = time.monotonic) -> None:
         self._closed = False
+        self._clock = clock
 
     def read(self) -> ImuSample:
         if self._closed:
@@ -120,7 +141,7 @@ class MockImuBackend:
             angular_velocity_rad_s=(0.0, 0.0, 0.0),
             linear_acceleration_m_s2=(0.0, 0.0, 9.80665),
             calibration=3,
-            timestamp_s=time.monotonic(),
+            timestamp_s=self._clock(),
         )
 
     def close(self) -> None:
@@ -178,17 +199,14 @@ class Bno055CompatibilityBackend:
         self._sensor = sensor
 
     def read(self) -> ImuSample:
-        quaternion_xyzw = tuple(float(value) for value in self._sensor.quaternion)
+        # CircuitPython BNO055 exposes the register order w, x, y, z;
+        # BNO08x uses x, y, z, w and needs a different conversion above.
+        quaternion_wxyz = tuple(float(value) for value in self._sensor.quaternion)
         gyro = tuple(float(value) for value in self._sensor.gyro)
         acceleration = tuple(float(value) for value in self._sensor.linear_acceleration)
         calibration = min(int(value) for value in self._sensor.calibration_status)
         return ImuSample(
-            quaternion_wxyz=(
-                quaternion_xyzw[3],
-                quaternion_xyzw[0],
-                quaternion_xyzw[1],
-                quaternion_xyzw[2],
-            ),
+            quaternion_wxyz=quaternion_wxyz,
             angular_velocity_rad_s=gyro,
             linear_acceleration_m_s2=acceleration,
             calibration=calibration,
