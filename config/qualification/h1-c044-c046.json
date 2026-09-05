@@ -2,6 +2,7 @@
   "schema_version": "actuator-qualification/v1",
   "gate": "H1",
   "control_hz": 50,
+  "stop_temperature_c": 55,
   "step_tests": {
     "angles_deg": [10, 30, 60],
     "repetitions": 20,

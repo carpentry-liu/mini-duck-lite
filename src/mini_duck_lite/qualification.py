@@ -10,7 +10,8 @@ import math
 from pathlib import Path
 import statistics
 import subprocess
-from typing import Any
+import time
+from typing import Any, Callable
 
 from mini_duck_lite.hardware import MockServoBus, ServoBus
 
@@ -33,15 +34,44 @@ SAMPLE_FIELDS = (
 )
 
 
-def load_plan(path: Path) -> dict[str, Any]:
-    with path.open(encoding="utf-8") as handle:
-        plan = json.load(handle)
+class SimulatedClock:
+    """A shared monotonic time base for accelerated mock qualification only."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += max(0.0, seconds)
+
+
+class QualificationStopped(RuntimeError):
+    """Stop a run while preserving its samples and failure summary."""
+
+
+def _validate_plan(plan: dict[str, Any]) -> None:
     if plan.get("schema_version") != "actuator-qualification/v1":
         raise ValueError("unsupported actuator qualification schema")
     if plan.get("gate") != "H1":
         raise ValueError("actuator qualification plan must target H1")
     if plan.get("control_hz") != 50:
         raise ValueError("V0.4 qualification must run at 50 Hz")
+    temperature = plan.get("stop_temperature_c")
+    if (
+        isinstance(temperature, bool)
+        or not isinstance(temperature, (int, float))
+        or not math.isfinite(temperature)
+        or not 0 < temperature <= 55
+    ):
+        raise ValueError("stop_temperature_c must be finite and within (0, 55]")
+
+
+def load_plan(path: Path) -> dict[str, Any]:
+    with path.open(encoding="utf-8") as handle:
+        plan = json.load(handle)
+    _validate_plan(plan)
     return plan
 
 
@@ -110,7 +140,17 @@ def run_qualification(
     backend_name: str,
     quick: bool,
     hardware_revision: str = "reference-prototype-a-pre-h1",
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+    timing_mode: str = "realtime",
 ) -> dict[str, Any]:
+    _validate_plan(plan)
+    if timing_mode not in {"realtime", "simulated"}:
+        raise ValueError("timing_mode must be realtime or simulated")
+    if timing_mode == "simulated" and (
+        backend_name != "mock" or not isinstance(bus, MockServoBus)
+    ):
+        raise ValueError("simulated timing is restricted to mock hardware")
     output_dir.mkdir(parents=True, exist_ok=True)
     samples_path = output_dir / "samples.csv"
     summary_path = output_dir / "summary.json"
@@ -129,8 +169,10 @@ def run_qualification(
         "backend": backend_name,
         "quick_mode": quick,
         "control_hz": plan["control_hz"],
-        "evidence_level": "SIM_PASS" if backend_name == "mock" else "HIL_PENDING",
-        "gate_eligible": backend_name != "mock" and not quick,
+        "evidence_level": "SIM" if backend_name == "mock" else "HIL_PENDING",
+        "status": "RUNNING",
+        "gate_eligible": False,
+        "timing_mode": timing_mode,
         "git_commit": git_commit,
         "git_dirty": git_dirty,
         "plan": plan,
@@ -146,18 +188,43 @@ def run_qualification(
     voltages_v: list[float] = []
     disconnected_samples = 0
     sample_index = 0
+    failure_reason: str | None = None
+    cleanup_errors: list[str] = []
+    sequence = _target_sequence(plan, quick=quick)
+    planned_samples = sum(count for _, _, count in sequence)
+    period = 1.0 / plan["control_hz"]
+    wall_started = time.monotonic()
+    control_started = clock()
+    next_sample_at = control_started + period
+
+    def read_sample():
+        nonlocal next_sample_at
+        sleep(max(0.0, next_sample_at - clock()))
+        if clock() - next_sample_at > period:
+            raise QualificationStopped("CONTROL_DEADLINE_MISS")
+        state = bus.read(bus_id)
+        if clock() - next_sample_at > period:
+            raise QualificationStopped("CONTROL_DEADLINE_MISS")
+        next_sample_at += period
+        return state
+
+    def check_temperature(temperature_c: float) -> None:
+        if not math.isfinite(temperature_c):
+            raise QualificationStopped("TEMPERATURE_INVALID")
+        if temperature_c >= plan["stop_temperature_c"]:
+            raise QualificationStopped("TEMPERATURE_LIMIT")
 
     try:
         with samples_path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=SAMPLE_FIELDS)
             writer.writeheader()
-            for test_name, target_deg, sample_count in _target_sequence(
-                plan, quick=quick
-            ):
+            for test_name, target_deg, sample_count in sequence:
+                if clock() - next_sample_at > period:
+                    raise QualificationStopped("CONTROL_DEADLINE_MISS")
                 target_rad = math.radians(target_deg)
                 bus.write_position(bus_id, target_rad)
                 for _ in range(sample_count):
-                    state = bus.read(bus_id)
+                    state = read_sample()
                     position_deg = math.degrees(state.position_rad)
                     error_deg = target_deg - position_deg
                     row = {
@@ -186,9 +253,12 @@ def run_qualification(
                     voltages_v.append(state.voltage_v)
                     disconnected_samples += int(not state.connected)
                     sample_index += 1
+                    check_temperature(state.temperature_c)
+                    if not state.connected:
+                        raise QualificationStopped("SERVO_DISCONNECTED")
             if plan.get("disconnect_test") and isinstance(bus, MockServoBus):
                 bus.set_connected(bus_id, False)
-                disconnected = bus.read(bus_id)
+                disconnected = read_sample()
                 writer.writerow(
                     {
                         "sample": sample_index,
@@ -212,8 +282,9 @@ def run_qualification(
                 disconnected_samples += 1
                 voltages_v.append(disconnected.voltage_v)
                 sample_index += 1
+                check_temperature(disconnected.temperature_c)
                 bus.set_connected(bus_id, True)
-                recovered = bus.read(bus_id)
+                recovered = read_sample()
                 writer.writerow(
                     {
                         "sample": sample_index,
@@ -239,25 +310,53 @@ def run_qualification(
                 temperatures_c.append(recovered.temperature_c)
                 voltages_v.append(recovered.voltage_v)
                 sample_index += 1
+                check_temperature(recovered.temperature_c)
+                if not recovered.connected:
+                    raise QualificationStopped("SERVO_RECONNECT_FAILED")
+    except QualificationStopped as error:
+        failure_reason = str(error)
+    except (OSError, RuntimeError, ValueError) as error:
+        failure_reason = f"SERVO_IO_ERROR: {type(error).__name__}: {error}"
     finally:
-        bus.torque_off()
-        bus.close()
+        # A broken transport may also reject shutdown. Preserve the original
+        # failure and still archive evidence; never imply torque was removed.
+        for name, operation in (("torque_off", bus.torque_off), ("close", bus.close)):
+            try:
+                operation()
+            except Exception as error:
+                cleanup_errors.append(f"{name}: {type(error).__name__}: {error}")
+        if cleanup_errors and failure_reason is None:
+            failure_reason = "SHUTDOWN_FAILED"
 
+    completed = failure_reason is None
     summary = {
         **metadata,
+        "status": "COMPLETED" if completed else "FAILED",
+        "evidence_level": (
+            ("SIM_PASS" if completed else "SIM_FAIL")
+            if backend_name == "mock"
+            else "HIL_PENDING"
+        ),
+        "gate_eligible": completed and backend_name != "mock" and not quick,
+        "failure_reason": failure_reason,
+        "cleanup_errors": cleanup_errors,
         "finished_at": datetime.now().astimezone().isoformat(),
         "sample_count": sample_index,
+        "planned_trajectory_samples": planned_samples,
+        "completed_trajectory_samples": len(errors_deg),
+        "elapsed_control_seconds": clock() - control_started,
+        "elapsed_wall_seconds": time.monotonic() - wall_started,
         "metrics": {
             "tracking_rmse_deg": (
-                sum(error * error for error in errors_deg) / len(errors_deg)
-            )
-            ** 0.5,
-            "mean_latency_ms": statistics.fmean(latencies_ms),
-            "peak_current_a": max(currents_a),
-            "minimum_voltage_v": min(voltages_v),
-            "peak_temperature_c": max(temperatures_c),
+                (sum(error * error for error in errors_deg) / len(errors_deg)) ** 0.5
+                if errors_deg else None
+            ),
+            "mean_latency_ms": statistics.fmean(latencies_ms) if latencies_ms else None,
+            "peak_current_a": max(currents_a, default=None),
+            "minimum_voltage_v": min(voltages_v, default=None),
+            "peak_temperature_c": max(temperatures_c, default=None),
             "disconnected_samples": disconnected_samples,
-            "packet_loss_fraction": disconnected_samples / sample_index,
+            "packet_loss_fraction": disconnected_samples / sample_index if sample_index else None,
         },
         "artifacts": {
             "samples_csv": str(samples_path.resolve()),
@@ -289,7 +388,8 @@ def main() -> None:
     args = parser.parse_args()
 
     plan = load_plan(args.plan)
-    bus = MockServoBus([args.bus_id])
+    clock = SimulatedClock()
+    bus = MockServoBus([args.bus_id], clock=clock)
     summary = run_qualification(
         plan=plan,
         output_dir=args.output_dir,
@@ -299,8 +399,13 @@ def main() -> None:
         backend_name=args.backend,
         quick=args.quick,
         hardware_revision=args.hardware_revision,
+        clock=clock,
+        sleep=clock.sleep,
+        timing_mode="simulated",
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+    if summary["status"] != "COMPLETED":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
