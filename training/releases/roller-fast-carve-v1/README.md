@@ -1,6 +1,6 @@
 # Roller Fast Carve Gate · 可复现训练发布包
 
-这是 2026-09-01 完成、2026-09-02 增补物理遥测的 Microduck **连续轮滑障碍秀 v1.1.0**。目标不是做一段关键帧动画，而是在连续物理仿真中组合三个 50 Hz ONNX 策略，完成：
+这是 2026-09-01 完成、2026-09-02 增补物理遥测、2026-09-05 修正关节力矩参考点的 Microduck **连续轮滑障碍秀 v1.1.1**。目标不是做一段关键帧动画，而是在连续物理仿真中组合三个 50 Hz ONNX 策略，完成：
 
 > 远距离加速 → 带速甩弯 → 边滑边低头穿杆 → 出杆渐起 → 360° 旋转 → 急停歪头
 
@@ -19,6 +19,8 @@ python -m http.server 8082 --directory training/releases/roller-fast-carve-v1/ev
 ```
 
 然后打开 `http://localhost:8082/physics-viewer/`。MP4 自身不能点击，因此视频每 2.5 秒自动轮播一个代表性关节。
+
+v1.1.1 修正了六维传递力矩的参考点：MuJoCo 的 `cfrc_int` 原始力矩以树质心为原点；当前发布数据将它平移到关节 anchor，坐标轴保持世界方向。JSON/CSV 明确记录 `wrench_origin` / `wrench_origin_m` 和 `wrench_axes`，遥测 schema 为 `1.1.0`。分析视频、预览图和交互页已随修正数据重新生成。策略权重、纯净视频和原路线验收保持原版本；历史 `0003` 补丁保留，修正位于新增 `0004`。
 
 ## 结果
 
@@ -43,7 +45,7 @@ python -m http.server 8082 --directory training/releases/roller-fast-carve-v1/ev
 |---|---|---|
 | `weights/` | 两组本机 PPO checkpoint、对应 ONNX，以及上游 roller ONNX | 继续训练、评估和 50 Hz 回放 |
 | `logs/` | 终端全量日志、TensorBoard event | 查看 reward、termination、吞吐和学习过程 |
-| `source-patches/` | 相对上游固定 commit 的三个干净补丁 | 复现环境、reward、场景、控制器、物理遥测和测试 |
+| `source-patches/` | 相对上游固定 commit 的四个顺序补丁 | 复现环境、reward、场景、控制器、物理遥测和测试 |
 | `evidence/` | 纯净/分析 MP4、交互回放页、截图、CSV、JSON | 人眼检查、关节诊断与自动验收 |
 | `MANIFEST.json` | 版本、环境、来源、SHA-256 与字节数 | 防止下载或 LFS 文件损坏 |
 
@@ -75,11 +77,12 @@ git checkout d424a0c899f6b33cbd3daeb279913134349c0b63
 git apply /path/to/0001-add-forward-speed-tracking-reward.patch
 git apply /path/to/0002-add-continuous-roller-showcase.patch
 git apply /path/to/0003-feat-showcase-add-physics-telemetry-overlays.patch
+git apply /path/to/0004-fix-joint-wrench-reference-frame.patch
 uv sync
-uv run --with pytest pytest tests/test_roller_crouch_cfg.py tests/test_showcase_timeline.py tests/test_physics_overlay.py
+uv run --with pytest pytest tests/test_roller_crouch_cfg.py tests/test_showcase_timeline.py tests/test_physics_overlay.py tests/test_joint_wrench.py
 ```
 
-前三个补丁已在固定到上述 commit 的独立 worktree 中按顺序构建。它们刻意不包含同一实验分支中的其他传播动作，便于上游审查。
+四个补丁已在固定到上述 commit 的隔离副本中按顺序应用和验证。它们刻意不包含同一实验分支中的其他传播动作，便于上游审查。`test_joint_wrench.py` 使用两个朝向的静态梁，对照关节原点处的 MuJoCo force/torque sensor 验证世界坐标系下的六维量。
 
 ## 训练与查看曲线
 
@@ -141,7 +144,7 @@ MUJOCO_GL=egl uv run python scripts/run_roller_showcase.py \
   --fps 50 --width 1280 --height 720
 ```
 
-分析回放仍是 **SIM**。`cfrc_int` 是 `mj_rnePostConstraint` 后得到的刚体空间传递力；惯性力矩来自 `M(q)qacc`，驱动力矩来自 `qfrc_actuator`，接触六维力来自 `mj_contactForce`。详细口径见 [`docs/experiments/2026-09-02-roller-physics-visualization.md`](../../../docs/experiments/2026-09-02-roller-physics-visualization.md)。
+分析回放仍是 **SIM**。`cfrc_int` 是 `mj_rnePostConstraint` 后得到的 COM 原点刚体空间传递力；关节力矩使用 `tau_anchor = tau_com + (subtree_com[body_rootid] - xanchor) × force` 平移到关节原点，XYZ 轴保持世界方向。惯性力矩来自 `M(q)qacc`，驱动力矩来自 `qfrc_actuator`，接触六维力来自 `mj_contactForce`。详细口径见 [`docs/experiments/2026-09-02-roller-physics-visualization.md`](../../../docs/experiments/2026-09-02-roller-physics-visualization.md)。
 
 验证下载内容：
 

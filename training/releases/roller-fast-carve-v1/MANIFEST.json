@@ -1,5 +1,5 @@
 {
-  "release": "roller-fast-carve-v1.1.0",
+  "release": "roller-fast-carve-v1.1.1",
   "created_at": "2026-09-02T18:40:00+08:00",
   "evidence_level": "SIM",
   "upstream_repository": "https://github.com/pollen-robotics/microduck_rl",
@@ -17,30 +17,143 @@
     "policy_step_seconds": 0.02
   },
   "payload": [
-    {"path":"evidence/roller_fast_carve_physics_overlay_50fps.mp4","bytes":30987462,"sha256":"741d1e85b9dab8e3deef8854c6c5db41018e28d851adbebe6ccd9da51a33c544"},
-    {"path":"evidence/roller_fast_carve_physics_preview.jpg","bytes":245694,"sha256":"887616a0bed460f5f11632ddfb1c19f5500d270e2a4ef25d9f9433098a87b604"},
-    {"path":"evidence/roller_fast_carve_physics_replay_metrics.csv","bytes":243208,"sha256":"95827e6f74057bed42b73c6ebf53b786621cffe6f0a07155f9619547511c71fd"},
-    {"path":"evidence/roller_fast_carve_physics_replay_summary.json","bytes":1234,"sha256":"bfb4cfdca9dace5edd7cb16fad2c9c56d3327dc0a531f2c86278ffe58292b102"},
-    {"path":"evidence/roller_fast_carve_physics_telemetry.csv","bytes":2634631,"sha256":"37c4f1f048b290e577cbd8b0a5c139c001c241eab6e1ad41cafef7ca1fa25b61"},
-    {"path":"evidence/roller_fast_carve_physics_telemetry.json","bytes":6800543,"sha256":"86400f808b8db9c6910c8bb282868aacb95be4a2a1efa9389ebb37bb822c86ba"},
-    {"path":"evidence/physics-viewer/index.html","bytes":5822,"sha256":"70ccd91a1f2e0146c63300bcf693444755abf106321c73ffc296a9be74df103d"},
-    {"path":"evidence/physics-viewer/telemetry.js","bytes":6800570,"sha256":"b20bce6d08b4fdb9eca1704890384b72fd834b28f15037466efd630575c0f022"},
-    {"path":"source-patches/0003-feat-showcase-add-physics-telemetry-overlays.patch","bytes":43096,"sha256":"89d83f5bf89f2d121f8cebe3fc3728b5fb89881c367e592369fbe0faae7c099a"},
-    {"path":"evidence/roller_fast_carve_gate_final_50fps.mp4","bytes":17353457,"sha256":"d099bc54c35389bf1bae8c056f2470f8d049c63f9d65712e13f3143442ca465c"},
-    {"path":"evidence/roller_fast_carve_gate_final_contact_sheet.jpg","bytes":37657,"sha256":"ec87c741187368233e60bc5af703d57d5a8dcfc645933f277d3252f05c6b672b"},
-    {"path":"evidence/roller_fast_carve_gate_final_metrics.csv","bytes":243208,"sha256":"95827e6f74057bed42b73c6ebf53b786621cffe6f0a07155f9619547511c71fd"},
-    {"path":"evidence/roller_fast_carve_gate_final_summary.json","bytes":1285,"sha256":"a8399756e06d896a8121b1e6f7a2b84da23c82e8ef36ec0314a2185600425bee"},
-    {"path":"logs/dynamic_crouch_train.log","bytes":932702,"sha256":"ac9209729791dc3b678184e687c693fc13c5c3860632ef504449ecd61716239f"},
-    {"path":"logs/dynamic_crouch.tfevents.1788245485","bytes":997782,"sha256":"1d4d3a9d92953f47b82398840e939992d2e07f4135a36c51f6538f68fc8664db"},
-    {"path":"logs/spin_train.log","bytes":1084725,"sha256":"f93fcd553837d1b15af0dc537f3a91e67051c4a52031bd30f534419f02b37832"},
-    {"path":"logs/spin.tfevents.1788231735","bytes":1091203,"sha256":"a9410bdeeeacdf58d3e39813f71bfa6bd9237152286e5e969414307aec92e198"},
-    {"path":"source-patches/0001-add-forward-speed-tracking-reward.patch","bytes":1215,"sha256":"491084694b1aac78af5629b0e7d1e2d051a03640ac2b69b670078e076dea30e3"},
-    {"path":"source-patches/0002-add-continuous-roller-showcase.patch","bytes":74280,"sha256":"034e5a4d1c56f525f755126846a58a659c002cafca251b95bdee81298c09df89"},
-    {"path":"UPSTREAM_LICENSE.txt","bytes":11553,"sha256":"48a029ca4cffafe32428e9f7d3f6a54ce637fac5327a9ccf88c93cb3c40e5a8a"},
-    {"path":"weights/dynamic_crouch_model_400.onnx","bytes":793779,"sha256":"c330f6de0ca1d2818e16d3732a9af29074398dc0c171b0f4add4ea8a84b7eba8"},
-    {"path":"weights/dynamic_crouch_model_400.pt","bytes":4855651,"sha256":"19a1e5a35cd09a03f7bd780808bb5bebd2babb72afae36aa762ccade2abf55af"},
-    {"path":"weights/spin_model_500.onnx","bytes":793826,"sha256":"e4ff68c80f1ef34fd8dde10b39fedbab42a21c5b2761821746d48a904b9d56a5"},
-    {"path":"weights/spin_model_500.pt","bytes":4855651,"sha256":"7ab7e3011b4d916ccb75a3a67225f0c359d23f1811bd48c020c6709efdb780ca"},
-    {"path":"weights/upstream_roller.onnx","bytes":793685,"sha256":"cf05651d2708a2f9364212e86b866c97a70ace8131c492500105e8f28bf99afd"}
-  ]
+    {
+      "path": "evidence/roller_fast_carve_physics_overlay_50fps.mp4",
+      "bytes": 31837443,
+      "sha256": "f38efee1299e16a7d6c2ac5910bd995460b9def5a13ada5be37680e2e320f903"
+    },
+    {
+      "path": "evidence/roller_fast_carve_physics_preview.jpg",
+      "bytes": 328406,
+      "sha256": "dce46d95bee26d18858bfe67ce5bf912f1a8324a7266c10176e4fbf30bfd4a0f"
+    },
+    {
+      "path": "evidence/roller_fast_carve_physics_replay_metrics.csv",
+      "bytes": 243208,
+      "sha256": "95827e6f74057bed42b73c6ebf53b786621cffe6f0a07155f9619547511c71fd"
+    },
+    {
+      "path": "evidence/roller_fast_carve_physics_replay_summary.json",
+      "bytes": 1215,
+      "sha256": "a4f9c63b08dd1dc97f1bb843f1ca3ca53c9f4b3a4431589cbc61e0f82c38e2ac"
+    },
+    {
+      "path": "evidence/roller_fast_carve_physics_telemetry.csv",
+      "bytes": 3216559,
+      "sha256": "6f675d685e3aec43459b824f3079440940aeb0a7a20c0e1a634b96ed5afe1bb3"
+    },
+    {
+      "path": "evidence/roller_fast_carve_physics_telemetry.json",
+      "bytes": 7696917,
+      "sha256": "9ef4dc442affa714db42e5afe20062d70d80f7a6bf8822b65e1151132fd6d8fb"
+    },
+    {
+      "path": "evidence/physics-viewer/index.html",
+      "bytes": 5862,
+      "sha256": "0b618aeb5cdf955869f02a58c61f83357dc1d97c392096d7d3a0ee779a227e85"
+    },
+    {
+      "path": "evidence/physics-viewer/telemetry.js",
+      "bytes": 7696944,
+      "sha256": "3dae03e352792e89f6ab012fc9ab9dde4da9018bfe373d354e7087addba9ae09"
+    },
+    {
+      "path": "source-patches/0003-feat-showcase-add-physics-telemetry-overlays.patch",
+      "bytes": 43096,
+      "sha256": "89d83f5bf89f2d121f8cebe3fc3728b5fb89881c367e592369fbe0faae7c099a"
+    },
+    {
+      "path": "evidence/roller_fast_carve_gate_final_50fps.mp4",
+      "bytes": 17353457,
+      "sha256": "d099bc54c35389bf1bae8c056f2470f8d049c63f9d65712e13f3143442ca465c"
+    },
+    {
+      "path": "evidence/roller_fast_carve_gate_final_contact_sheet.jpg",
+      "bytes": 37657,
+      "sha256": "ec87c741187368233e60bc5af703d57d5a8dcfc645933f277d3252f05c6b672b"
+    },
+    {
+      "path": "evidence/roller_fast_carve_gate_final_metrics.csv",
+      "bytes": 243208,
+      "sha256": "95827e6f74057bed42b73c6ebf53b786621cffe6f0a07155f9619547511c71fd"
+    },
+    {
+      "path": "evidence/roller_fast_carve_gate_final_summary.json",
+      "bytes": 1285,
+      "sha256": "a8399756e06d896a8121b1e6f7a2b84da23c82e8ef36ec0314a2185600425bee"
+    },
+    {
+      "path": "logs/dynamic_crouch_train.log",
+      "bytes": 932702,
+      "sha256": "ac9209729791dc3b678184e687c693fc13c5c3860632ef504449ecd61716239f"
+    },
+    {
+      "path": "logs/dynamic_crouch.tfevents.1788245485",
+      "bytes": 997782,
+      "sha256": "1d4d3a9d92953f47b82398840e939992d2e07f4135a36c51f6538f68fc8664db"
+    },
+    {
+      "path": "logs/spin_train.log",
+      "bytes": 1084725,
+      "sha256": "f93fcd553837d1b15af0dc537f3a91e67051c4a52031bd30f534419f02b37832"
+    },
+    {
+      "path": "logs/spin.tfevents.1788231735",
+      "bytes": 1091203,
+      "sha256": "a9410bdeeeacdf58d3e39813f71bfa6bd9237152286e5e969414307aec92e198"
+    },
+    {
+      "path": "source-patches/0001-add-forward-speed-tracking-reward.patch",
+      "bytes": 1215,
+      "sha256": "491084694b1aac78af5629b0e7d1e2d051a03640ac2b69b670078e076dea30e3"
+    },
+    {
+      "path": "source-patches/0002-add-continuous-roller-showcase.patch",
+      "bytes": 74280,
+      "sha256": "034e5a4d1c56f525f755126846a58a659c002cafca251b95bdee81298c09df89"
+    },
+    {
+      "path": "UPSTREAM_LICENSE.txt",
+      "bytes": 11553,
+      "sha256": "48a029ca4cffafe32428e9f7d3f6a54ce637fac5327a9ccf88c93cb3c40e5a8a"
+    },
+    {
+      "path": "weights/dynamic_crouch_model_400.onnx",
+      "bytes": 793779,
+      "sha256": "c330f6de0ca1d2818e16d3732a9af29074398dc0c171b0f4add4ea8a84b7eba8"
+    },
+    {
+      "path": "weights/dynamic_crouch_model_400.pt",
+      "bytes": 4855651,
+      "sha256": "19a1e5a35cd09a03f7bd780808bb5bebd2babb72afae36aa762ccade2abf55af"
+    },
+    {
+      "path": "weights/spin_model_500.onnx",
+      "bytes": 793826,
+      "sha256": "e4ff68c80f1ef34fd8dde10b39fedbab42a21c5b2761821746d48a904b9d56a5"
+    },
+    {
+      "path": "weights/spin_model_500.pt",
+      "bytes": 4855651,
+      "sha256": "7ab7e3011b4d916ccb75a3a67225f0c359d23f1811bd48c020c6709efdb780ca"
+    },
+    {
+      "path": "weights/upstream_roller.onnx",
+      "bytes": 793685,
+      "sha256": "cf05651d2708a2f9364212e86b866c97a70ace8131c492500105e8f28bf99afd"
+    },
+    {
+      "path": "source-patches/0004-fix-joint-wrench-reference-frame.patch",
+      "bytes": 7436,
+      "sha256": "3014d5c8737e11b89adcf859518c0d50158bdcfd332597aa3935bd13c130feb6"
+    }
+  ],
+  "updated_at": "2026-09-05T18:08:15.973442+08:00",
+  "physics_telemetry": {
+    "schema_version": "1.1.0",
+    "wrench_origin": "joint_anchor",
+    "wrench_axes": "world",
+    "correction_patch": "source-patches/0004-fix-joint-wrench-reference-frame.patch",
+    "validation": "974-frame deterministic replay; unchanged route CSV; static-beam MuJoCo force/torque sensors at 0 and 90 degrees"
+  }
 }

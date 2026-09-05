@@ -24,7 +24,7 @@ h1{font-size:22px;margin:0} .badge{color:#5de0b2} main{display:grid;grid-templat
   <aside class="side">
     <section class="card card-pad"><h2>点击关节</h2><div id="jointMap" class="joint-map"></div></section>
     <section class="card card-pad"><h2 id="chartTitle">六维传递力 / 力矩</h2><canvas id="chart" width="900" height="420"></canvas><div id="stats" class="stats"></div></section>
-    <section class="card card-pad legend">cfrc_int 是 MuJoCo 递归牛顿—欧拉后约束计算得到的关节/刚体空间传递量，并非真机六维力传感器读数。驱动力矩与惯性力矩分别来自 qfrc_actuator 和 M(q)qacc。</section>
+    <section class="card card-pad legend">六维传递量的原点是当前关节 anchor，坐标轴与世界坐标系一致。力矩由 cfrc_int 的 COM 参考点平移到关节原点，并非真机传感器读数。驱动力矩与惯性力矩分别来自 qfrc_actuator 和 M(q)qacc。</section>
   </aside>
 </main>
 <script src="telemetry.js"></script>

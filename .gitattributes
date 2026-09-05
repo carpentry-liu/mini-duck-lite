@@ -7,8 +7,10 @@
 *.pt filter=lfs diff=lfs merge=lfs -text
 *.mp4 filter=lfs diff=lfs merge=lfs -text
 *.tfevents.* filter=lfs diff=lfs merge=lfs -text
-training/releases/*/evidence/*.csv -text
+training/releases/*/evidence/*.csv -text whitespace=cr-at-eol
 training/releases/*/evidence/*.json -text
+training/releases/*/evidence/physics-viewer/*.html -text
+training/releases/*/evidence/physics-viewer/*.js -text
 training/releases/*/logs/*.log -text
-training/releases/*/source-patches/*.patch -text
+training/releases/*/source-patches/*.patch -text whitespace=-blank-at-eol
 training/releases/*/UPSTREAM_LICENSE.txt -text

@@ -22,11 +22,15 @@ MP4 本身不能点击，因此视频按时间自动轮播代表性关节；点�
 | 驱动力矩 | `qfrc_actuator` | N·m | 执行器映射到广义坐标后的实际驱动力矩 |
 | 惯性力矩 | `M(q) qacc`，由 `mj_mulM` 计算 | N·m | 仅用于关节转动自由度；与驱动力矩分层显示 |
 | 约束力矩 | `qfrc_constraint` | N·m | 接触及其他约束映射到关节自由度的广义力 |
-| 关节六维传递量 | `mj_rnePostConstraint` 后的子刚体 `cfrc_int` | N / N·m | `Fx/Fy/Fz` 与 `Tx/Ty/Tz`，是父子连接处传递的空间力，不是测力传感器实测值 |
+| 关节六维传递量 | `mj_rnePostConstraint` 后的子刚体 `cfrc_int`，力矩平移到关节 anchor | N / N·m | `Fx/Fy/Fz` 与 `Tx/Ty/Tz`；原点是关节 anchor，XYZ 轴与世界坐标系一致，不是测力传感器实测值 |
 | 接触六维力 | `mj_contactForce` | N / N·m | 从接触坐标系变换到世界坐标系后保存 |
 | 接触位置 | `contact.pos` | m | 用于接触点与热力图定位 |
 
 所有数据按策略控制频率 50 Hz 保存；MuJoCo 内部仍以 0.005 s 步长积分。
+
+2026-09-05 发布修正（v1.1.1）：旧版直接显示 `cfrc_int[:3]`，其力矩原点实际是所在运动树的质心，会与关节位置的力矩不同。现在使用 `tau_anchor = tau_com + (subtree_com[body_rootid] - xanchor) × force`，保留世界坐标轴。遥测 schema `1.1.0` 明确写入 `wrench_origin=joint_anchor`、`wrench_axes=world`；每个关节记录动态 `wrench_origin_m`，CSV 同时保存其 XYZ 坐标。历史补丁 `0003` 不变，新补丁 `0004` 修正采集器、展示口径并增加与 MuJoCo 关节原点 force/torque sensor 的对照测试。
+
+例如质量 1 kg、质心距铰链 0.5 m 的水平静态梁，旧值为 `[0, 0, 0] N·m`，关节原点力矩为 `[0, -4.905, 0] N·m`。修正后的值与 MuJoCo torque sensor 一致，并覆盖旋转 90° 后的世界坐标轴转换。参考 [MuJoCo c-frame 定义](https://mujoco.readthedocs.io/en/stable/APIreference/APItypes.html#c-frame-variables)。
 
 ## 派生可视化
 

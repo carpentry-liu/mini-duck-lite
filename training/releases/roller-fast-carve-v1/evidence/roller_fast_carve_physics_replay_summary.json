@@ -29,5 +29,5 @@
     "hard_stop": true
   },
   "video": null,
-  "metrics": "artifacts/showcase/roller_fast_carve_physics_replay_metrics.csv"
+  "metrics": "roller_fast_carve_physics_replay_metrics.csv"
 }

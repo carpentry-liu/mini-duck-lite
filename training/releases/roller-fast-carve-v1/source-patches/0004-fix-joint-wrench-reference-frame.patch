@@ -1,0 +1,130 @@
+From: Mini Duck maintainers
+Subject: [PATCH 4/4] fix(telemetry): express joint wrenches at hinge anchors
+
+Translate COM-based spatial moments to joint anchors in world axes.
+Record the wrench reference frame and verify against MuJoCo site sensors.
+
+diff --git a/scripts/physics_overlay.py b/scripts/physics_overlay.py
+--- a/scripts/physics_overlay.py
++++ b/scripts/physics_overlay.py
+@@ -157,6 +157,13 @@
+             dof_index = spec["dof"]
+             body_id = spec["body"]
+             transmitted = np.asarray(self.data.cfrc_int[body_id], dtype=np.float64)
++            anchor = np.asarray(self.data.xanchor[spec["joint_id"]], dtype=np.float64)
++            com_origin = self.data.subtree_com[self.model.body_rootid[body_id]]
++            # cfrc_int is a world-aligned wrench about the tree COM. Translate
++            # its moment to this hinge anchor without rotating the axes.
++            torque_at_anchor = transmitted[:3] + np.cross(
++                com_origin - anchor, transmitted[3:6]
++            )
+             joint_values[joint_name] = {
+                 "position_rad": float(self.data.qpos[qpos_index]),
+                 "displacement_rad": float(
+@@ -167,7 +174,9 @@
+                 "inertia_torque_nm": float(inertia[dof_index]),
+                 "constraint_torque_nm": float(self.data.qfrc_constraint[dof_index]),
+                 "force_n": [float(value) for value in transmitted[3:6]],
+-                "torque_nm": [float(value) for value in transmitted[:3]],
++                "torque_nm": [float(value) for value in torque_at_anchor],
++                "wrench_origin_m": [float(value) for value in anchor],
++                "wrench_axes": "world",
+                 "body_rpy_deg": _quat_to_rpy_deg(self.data.xquat[body_id]),
+                 "anchor_m": [float(value) for value in self.data.xanchor[spec["joint_id"]]],
+                 "axis_world": [float(value) for value in self.data.xaxis[spec["joint_id"]]],
+@@ -190,12 +199,15 @@
+         json_path.parent.mkdir(parents=True, exist_ok=True)
+         csv_path.parent.mkdir(parents=True, exist_ok=True)
+         payload = {
+-            "schema_version": "1.0.0",
++            "schema_version": "1.1.0",
+             "evidence_level": "SIM",
+             "control_hz": self.control_hz,
+             "joint_names": self.joint_names,
+             "spatial_wrench_order": ["Tx", "Ty", "Tz", "Fx", "Fy", "Fz"],
++            "wrench_origin": "joint_anchor",
++            "wrench_axes": "world",
+             "field_notes": {
++                "joint_wrench": "World axes at joint anchor; torque_com + (subtree_com[body_rootid] - xanchor) cross force",
+                 "friction_field": "DERIVED Gaussian interpolation of discrete contact tangential forces",
+                 "torque_vortex": "DERIVED glyph from signed joint torque; not a continuum field",
+                 "force_arrow": "Direction is physical; displayed length uses log1p scaling",
+@@ -232,6 +244,9 @@
+                     row[prefix + axis] = value
+                 for axis, value in zip(("tx_nm", "ty_nm", "tz_nm"), values["torque_nm"]):
+                     row[prefix + axis] = value
++                for axis, value in zip(("wrench_origin_x_m", "wrench_origin_y_m", "wrench_origin_z_m"), values["wrench_origin_m"]):
++                    row[prefix + axis] = value
++                row[prefix + "wrench_axes"] = values["wrench_axes"]
+                 for axis, value in zip(("roll_deg", "pitch_deg", "yaw_deg"), values["body_rpy_deg"]):
+                     row[prefix + axis] = value
+             rows.append(row)
+@@ -508,7 +523,7 @@
+             y = 846 + index * 31
+             draw.text((1308, y), symbol, font=self.heading_font, fill=color)
+             draw.text((1344, y + 2), label, font=self.body_font, fill=TEXT)
+-        draw.text((1305, 1041), "cfrc_int：仿真关节传递量，不是真机传感器读数", font=self.small_font, fill=MUTED)
++        draw.text((1305, 1041), "关节原点 · 世界坐标轴 · SIM 六维传递量", font=self.small_font, fill=MUTED)
+ 
+     def _draw_chart(
+         self,
+@@ -652,7 +667,7 @@
+   <aside class="side">
+     <section class="card card-pad"><h2>点击关节</h2><div id="jointMap" class="joint-map"></div></section>
+     <section class="card card-pad"><h2 id="chartTitle">六维传递力 / 力矩</h2><canvas id="chart" width="900" height="420"></canvas><div id="stats" class="stats"></div></section>
+-    <section class="card card-pad legend">cfrc_int 是 MuJoCo 递归牛顿—欧拉后约束计算得到的关节/刚体空间传递量，并非真机六维力传感器读数。驱动力矩与惯性力矩分别来自 qfrc_actuator 和 M(q)qacc。</section>
++    <section class="card card-pad legend">六维传递量的原点是当前关节 anchor，坐标轴与世界坐标系一致。力矩由 cfrc_int 的 COM 参考点平移到关节原点，并非真机传感器读数。驱动力矩与惯性力矩分别来自 qfrc_actuator 和 M(q)qacc。</section>
+   </aside>
+ </main>
+ <script src="telemetry.js"></script>
+diff --git a/tests/test_joint_wrench.py b/tests/test_joint_wrench.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_joint_wrench.py
+@@ -0,0 +1,46 @@
++"""Joint wrench reference frames agree with MuJoCo's own site sensors."""
++
++import importlib.util
++import json
++from pathlib import Path
++
++import mujoco
++import numpy as np
++import pytest
++
++
++MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts/physics_overlay.py"
++SPEC = importlib.util.spec_from_file_location("physics_overlay", MODULE_PATH)
++assert SPEC is not None and SPEC.loader is not None
++MODULE = importlib.util.module_from_spec(SPEC)
++SPEC.loader.exec_module(MODULE)
++
++
++@pytest.mark.parametrize("yaw", [0, 90])
++def test_joint_wrench_matches_sensor_at_anchor_in_world_axes(yaw, tmp_path):
++    model = mujoco.MjModel.from_xml_string(f'''<mujoco><worldbody>
++      <body name="dummy" pos="3 0 1"><freejoint name="trunk_base_freejoint"/>
++        <geom type="sphere" size="0.1" mass="1"/></body>
++      <body name="beam" pos="0 0 1" euler="0 0 {yaw}">
++        <joint name="left_knee" type="hinge" axis="1 0 0"/>
++        <geom type="box" pos="0.5 0 0" size="0.5 0.05 0.05" mass="1"/>
++        <site name="joint_sensor" pos="0 0 0" size="0.01"/>
++      </body>
++    </worldbody><sensor><force site="joint_sensor"/>
++      <torque site="joint_sensor"/></sensor></mujoco>''')
++    data = mujoco.MjData(model)
++    mujoco.mj_forward(model, data)
++    recorder = MODULE.PhysicsRecorder(model, data, 50.0)
++    values = recorder.capture(0.0, "static")["joints"]["left_knee"]
++    site = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "joint_sensor")
++    rotation = data.site_xmat[site].reshape(3, 3)
++    np.testing.assert_allclose(values["force_n"], rotation @ data.sensordata[:3], atol=1e-12)
++    np.testing.assert_allclose(values["torque_nm"], rotation @ data.sensordata[3:6], atol=1e-12)
++    assert np.linalg.norm(values["torque_nm"]) == pytest.approx(4.905)
++    np.testing.assert_allclose(values["wrench_origin_m"], data.site_xpos[site])
++    assert values["wrench_axes"] == "world"
++    recorder.write(tmp_path / "telemetry.json", tmp_path / "telemetry.csv")
++    payload = json.loads((tmp_path / "telemetry.json").read_text())
++    assert payload["wrench_origin"] == "joint_anchor"
++    assert payload["wrench_axes"] == "world"
++    assert "joint.left_knee.wrench_origin_x_m" in (tmp_path / "telemetry.csv").read_text()
