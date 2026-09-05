@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 
 import pytest
+import onnx
+from onnx import TensorProto, helper
 
 from mini_duck_lite.evidence import EvidenceLevel, can_transition, validate_evidence
 from mini_duck_lite.hardware import MockImuBackend, MockServoBus
@@ -111,14 +113,21 @@ def test_evidence_levels_cannot_skip_hil_or_move_backward() -> None:
 
 def test_policy_bundle_requires_self_owned_10dof_contract(tmp_path: Path) -> None:
     model = tmp_path / "policy.onnx"
-    model.write_bytes(b"test-onnx")
+    graph = helper.make_graph(
+        [helper.make_node("MatMul", ["obs", "weights"], ["actions"])],
+        "ten-dof-test",
+        [helper.make_tensor_value_info("obs", TensorProto.FLOAT, [1, 50])],
+        [helper.make_tensor_value_info("actions", TensorProto.FLOAT, [1, 10])],
+        initializer=[helper.make_tensor("weights", TensorProto.FLOAT, [50, 10], [0.0] * 500)],
+    )
+    onnx.save(helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)]), model)
     contract = {
         "schema_version": "policy-contract/v1",
         "embodiment_version": "reference-prototype-a/test",
         "joint_order": list(JOINT_ORDER),
         "observation_size": 50,
         "action_size": 10,
-        "normalization": {"mean": [0.0], "std": [1.0]},
+        "normalization": {"mode": "standard", "mean": [0.0] * 50, "std": [1.0] * 50},
         "action_scale": 0.25,
         "control_hz": 50,
         "training_commit": "deadbeef",

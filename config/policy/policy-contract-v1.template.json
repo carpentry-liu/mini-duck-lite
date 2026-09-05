@@ -22,7 +22,11 @@
     "angular_velocity": "rad/s",
     "linear_velocity_command": "m/s"
   },
-  "normalization": null,
+  "normalization": {
+    "mode": "standard",
+    "mean": null,
+    "std": null
+  },
   "action_scale": null,
   "control_hz": 50,
   "training_commit": null,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,15 @@ REQUIRED_CANDIDATE_SKUS = {"STS3215-C044", "STS3215-C046"}
 
 class ManifestError(ValueError):
     """Raised when a hardware manifest violates a fail-closed contract."""
+
+
+def _is_finite_number(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
@@ -92,15 +102,15 @@ def audit_manifest(data: dict[str, Any]) -> dict[str, Any]:
     for joint in joints:
         name = joint.get("name", "<unknown>")
         bus_id = joint.get("bus_id")
-        if not isinstance(bus_id, int):
-            blockers.append(f"{name}.bus_id is TBD_MEASURE")
+        if type(bus_id) is not int or not 0 <= bus_id <= 253:
+            blockers.append(f"{name}.bus_id is TBD_MEASURE or outside 0..253")
         else:
             bus_ids.append(bus_id)
         limits = joint.get("soft_limit_rad")
         if (
             not isinstance(limits, list)
             or len(limits) != 2
-            or not all(isinstance(value, (int, float)) for value in limits)
+            or not all(_is_finite_number(value) for value in limits)
             or limits[0] >= limits[1]
         ):
             blockers.append(f"{name}.soft_limit_rad is not calibrated")
@@ -116,8 +126,12 @@ def audit_manifest(data: dict[str, Any]) -> dict[str, Any]:
         errors.append("joint bus IDs must be unique")
     if imu.get("calibration_state") != "HIL_PASS":
         blockers.append("BNO085 calibration has not passed HIL")
-    if data.get("power", {}).get("full_body_peak_current_a") is None:
-        blockers.append("full-body peak current is TBD_MEASURE")
+    power = data.get("power", {})
+    peak_current = power.get("full_body_peak_current_a")
+    if not _is_finite_number(peak_current) or peak_current <= 0:
+        blockers.append("full-body peak current is TBD_MEASURE or not finite and positive")
+    if power.get("measurement_state") != "HIL_PASS":
+        blockers.append("full-body peak current measurement has not passed HIL")
 
     valid = not errors
     return {
