@@ -69,3 +69,11 @@ H0 上游仿真通过后，当前 Gate 改为 H1 执行器/IMU 资格测试。�
 日期：2026-08-31
 
 PPO 训练在 WSL2 + GPU 完成；Pi Zero 2 W 只运行 50 Hz ONNX inference、安全控制和 telemetry。部署包必须绑定 10DOF joint order、normalizer、action scale、control rate、training commit 和 SHA256；官方 14DOF policy 禁止直接下发给 Reference Prototype A。
+
+## D-012：审查修复同时覆盖执行路径与证据
+
+日期：2026-09-05。关联 [REF-0001](refactoring/REF-0001-review-corrections/01-动机与方案.md)。
+
+安全反馈和期限必须在写入前校验；同步 runtime 不承诺抢占未知阻塞驱动，真实 backend 必须证明有界 I/O 并配本地 watchdog。mock 快进采用共享虚拟时钟，控制时长与墙钟耗时分开记录。
+
+ONNX 打包使用官方库交叉验证模型与合同；依赖作为可选 `policy` extra 提供，不放入 hard loop。物理六维力矩采用关节原点、世界坐标轴，修正源补丁时同步重生成发布分析数据与视频。步态验收先逐环境计算误差，避免跨环境相互抵消。

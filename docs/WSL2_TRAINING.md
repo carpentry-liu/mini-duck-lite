@@ -66,3 +66,9 @@ bash scripts/run_upstream_walk_training.sh \
 - 对 reward、DR、执行器模型和结构参数的每一次有意义修改。
 
 只保存一个“看起来会走”的视频不足以证明策略变好。
+
+## 当前验收口径
+
+`scripts/evaluate_upstream_walk.py` 的报告 schema 为 2。横移与偏航先对每个环境计算相对目标的时间平均误差，再对各环境的绝对误差求平均；不同环境持续向相反方向偏离不能互相抵消，同一环境的周期摆动仍允许时间平均抵消。非零 `--command-yaw` 比较实际速度与请求目标的偏差。
+
+历史报告保留执行时的判定版本。后续检查点选择应使用新口径，并保留 `mean_absolute_environment_net_yaw_error_radps` 和 `mean_absolute_environment_net_lateral_error_mps` 指标。该修复不单凭合成回归轨迹宣告旧 checkpoint 重新通过。

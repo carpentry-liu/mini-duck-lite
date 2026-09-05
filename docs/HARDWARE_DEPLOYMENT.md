@@ -25,7 +25,7 @@ flowchart LR
 
 ## 部署包包含什么
 
-`mini-duck-package-policy` 只接受 10DOF、50 Hz 且带 normalizer 与 training commit 的 contract，输出：
+`mini-duck-package-policy` 校验实际 ONNX 图和合同，只接受单 float32 输入 `[1, observation_size]`、输出 `[1, 10]`、50 Hz 且带有效 normalizer 与 training commit 的自包含模型，输出：
 
 ```text
 policy-bundle/
@@ -37,6 +37,7 @@ policy-bundle/
 `bundle-manifest.json` 保存模型和 contract 的 SHA256。工具生成 bundle 后仍保持 `real_hardware_enabled=false`，只有 HIL 验收和人工批准可以进入真机。
 
 ```bash
+uv sync --extra policy
 uv run mini-duck-package-policy \
   /path/to/self-10dof-policy.onnx \
   config/policy/policy-contract-v1.json \
@@ -44,6 +45,8 @@ uv run mini-duck-package-policy \
 ```
 
 当前仓库提供的是 contract 模板；官方 14DOF ONNX 会因 action size/joint order 不匹配而被拒绝。
+
+normalizer 必须显式声明 `standard`（完整 mean/std、有限且 std>0）或 `identity` 模式，规则见 [`INTERFACES.md`](INTERFACES.md)。更改 JSON 中的 action size 无法绕过实际模型输出维度检查；生成包仍需 HIL，不能据打包成功直接启用真机。
 
 ## Raspberry Pi 目标结构
 

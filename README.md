@@ -88,7 +88,7 @@ V0.4 的关键变化是 **No Hardware, No Done**：仿真、mock 和视频可以
 
 ### 可下载训练发布包
 
-[`roller-fast-carve-v1.1.0`](training/releases/roller-fast-carve-v1/README.md) 已公开保存完整复现材料：源码补丁、PPO checkpoint、ONNX、TensorBoard event、终端日志、逐控制步 JSON/CSV、验收数据、纯净视频、1080p 物理分析视频和可点击关节的交互页。每个载荷都有 SHA-256；大文件使用 Git LFS。该发布包证据等级为 **SIM**，不冒充真机成果。
+[`roller-fast-carve-v1.1.1`](training/releases/roller-fast-carve-v1/README.md) 保存完整复现材料：源码补丁、PPO checkpoint、ONNX、TensorBoard event、终端日志、逐控制步 JSON/CSV、验收数据、纯净视频、1080p 物理分析视频和可点击关节的交互页。v1.1.1 将六维力矩换算到关节原点，并更新分析数据与视频。每个载荷都有 SHA-256；大文件使用 Git LFS。该发布包证据等级为 **SIM**，不冒充真机成果。
 
 ## 强化学习是在 WSL2 里训练的吗
 
@@ -154,6 +154,10 @@ uv run mini-duck-runtime \
 ```
 
 这些命令验证配置、logger 和 safety state，不会连接真实舵机，也不会生成 HIL/REAL 结论。
+
+qualification mock 使用共享虚拟时钟按 20 ms 推进，时间戳与控制时长一致，`timing_mode=simulated`；虚拟热测试时长不能作为真机热测试证据。温度达到 55°C 时停止测试并归档失败。runtime 遇到异常反馈或超时会锁存安全状态；命令失败退出码为 1，只有请求周期全部正常完成才输出 `SIM_PASS`。
+
+打包策略前运行 `uv sync --extra policy` 安装可选 ONNX 校验依赖。工具检查实际模型图和合同，拒绝 14DOF 输出、无效归一化参数及未支持的外部 tensor 文件。完整合同见 [`docs/INTERFACES.md`](docs/INTERFACES.md)。
 
 ## 强化学习结果如何部署到真实硬件
 

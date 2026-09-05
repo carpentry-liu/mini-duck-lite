@@ -1,6 +1,6 @@
 # 当前进度
 
-更新时间：2026-09-02
+更新时间：2026-09-05
 
 ## 当前 Gate
 
@@ -10,6 +10,8 @@ V0.4 已将项目切换为 Hardware-First。官方 Microduck 14DOF 的 103.1M st
 
 ## 已完成
 
+- REF-0001 已修复代码审查确认的 12 项问题；项目测试 151 项、隔离上游物理测试 13 项通过，构建及 26 个发布载荷校验通过，详见 [验证记录](refactoring/REF-0001-review-corrections/03-验证.md)；
+- 物理分析发布包更新为 1.1.1：按关节原点修正力矩并重生成 974 帧分析证据，原始权重、纯净回放及路线指标保持一致；
 - WSL2 Ubuntu 24.04.3、Python 3.12.3、uv 0.11.7、RTX 5060 Ti 16 GB 训练链路通过；
 - 官方 14DOF `model_1000.pt` 在 128 环境固定直行 10 秒时 128/128 不摔、0 NaN；
 - 官方 roller/crouch 与本机 spin 策略已编排为 19.48 秒长路线：远端加速、转弯、下蹲穿杆、旋转、急停歪头，完整物理验收通过；
@@ -30,7 +32,7 @@ V0.4 已将项目切换为 Hardware-First。官方 Microduck 14DOF 的 103.1M st
 - bus ID、真实零位、软限位、电流、速度、温升、延迟与 backlash 仍为 `TBD_MEASURE`；
 - 真实 STS3215 backend、H1 30 min 测试和 H1 Gate Review 尚未完成；
 - 自有 10DOF MJCF 和 Policy Contract 需在机械/执行器参数收敛后继续；
-- 当前所有新增硬件命令只产生 `SIM_PASS`，不能标成 `HIL_PASS` 或 `REAL_PASS`。
+- 当前 qualification/runtime 仅使用 mock；成功产生 `SIM_PASS`，故障明确失败并返回非零退出码，不能标成 `HIL_PASS` 或 `REAL_PASS`。
 
 ## 下一任务
 
